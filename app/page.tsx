@@ -4,11 +4,11 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
 export default function Home() {
-  const [file, setFile] = useState(null)
+  const [file, setFile] = useState<any>(null)
   const [dragging, setDragging] = useState(false)
   const [question, setQuestion] = useState('')
   const [loading, setLoading] = useState(false)
-  const [report, setReport] = useState(null)
+  const [report, setReport] = useState<any>(null)
   const [filename, setFilename] = useState('')
 
   const handleFile = (f: any) => {
@@ -61,7 +61,7 @@ export default function Home() {
                 <p className="text-gray-600 text-xs mt-1">or click to browse</p>
               </>
             )}
-            <input id="fileInput" type="file" accept="audio/*" className="hidden" onChange={(e) => handleFile(e.target.files[0])} />
+            <input id="fileInput" type="file" accept="audio/*" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
           </div>
 
           {file && (
