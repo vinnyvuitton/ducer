@@ -46,7 +46,7 @@ export default function Home() {
             onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
             onDragLeave={() => setDragging(false)}
             onDrop={(e) => { e.preventDefault(); setDragging(false); handleFile(e.dataTransfer.files[0]) }}
-            onClick={() => document.getElementById('fileInput').click()}
+            onClick={() => (document.getElementById('fileInput') as HTMLElement)?.click()}
             className={`w-full max-w-md border border-dashed rounded-2xl p-16 text-center cursor-pointer transition-all duration-200 ${dragging ? 'border-white bg-white/5' : 'border-gray-700 hover:border-gray-500'}`}
           >
             {file ? (
