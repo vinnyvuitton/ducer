@@ -11,7 +11,7 @@ export default function Home() {
   const [report, setReport] = useState(null)
   const [filename, setFilename] = useState('')
 
-  const handleFile = (f) => {
+  const handleFile = (f: any) => {
     if (f && f.type.startsWith('audio/')) {
       setFile(f)
       setFilename(f.name)
@@ -30,7 +30,7 @@ export default function Home() {
     setLoading(false)
   }
 
-  const handleKeyDown = (e) => {
+  const handleKeyDown = (e: any) => {
     if (e.key === 'Enter') analyze()
   }
 
