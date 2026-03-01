@@ -4,16 +4,26 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
 const taglines = [
+  "The honest read on your music.",
+  "Your track. No filter.",
+  "The read your track deserves.",
   "Find out what you've got.",
-  "Get the full picture.",
   "Hear the truth.",
-  "Know exactly where it stands.",
-  "Get a real answer.",
-  "See what's really there.",
-  "Get the honest read.",
-  "Understand what you made.",
-  "Get the breakdown.",
   "Know what you're working with.",
+  "Get the breakdown.",
+  "Hear what the data says.",
+  "Let's see what you've got.",
+  "Drop it. I'm ready.",
+  "Bring it. Let's find out.",
+  "I've been waiting for this one.",
+  "Let's get into it.",
+  "Ready when you are.",
+  "Show me what you made.",
+  "Let's hear it.",
+  "Go ahead. Drop the track.",
+  "Alright. Let's see what we're working with.",
+  "I want to hear this.",
+  "Don't hold back. Drop it.",
 ]
 
 const randomTagline = taglines[Math.floor(Math.random() * taglines.length)]
