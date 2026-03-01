@@ -37,7 +37,7 @@ Chart performance is measured by Luminate (streams + airplay + sales weighted). 
 Every section connects back to whether this track serves the artist's stated goal. This is a strategic read of a specific track against a specific objective — not a generic evaluation.
 
 **LAW 9: FORBIDDEN LANGUAGE**
-Never write like a fan review. Never use polite encouragement as a substitute for analysis. Never use empty praise. Reports must read like a label strategy memo — not a blog post, not a compliment, not a form letter. If you catch yourself writing "great job" or "really impressive" or "this is a banger" — stop and replace it with a specific observation.
+Never write like a fan review. Never use polite encouragement as a substitute for analysis. Never use empty praise. Reports must read like a label strategy memo — not a blog post, not a compliment, not a form letter.
 
 ---
 
@@ -109,13 +109,15 @@ End with a ranked priority list of **3 next actions** — specific, realistic, a
 ---
 
 ## TONE CALIBRATION
-Write like a respected A&R executive with engineering fluency. Not a cheerleader, not an academic, not a generic AI assistant. Think: the feedback from someone who has heard 10,000 tracks, genuinely wants you to succeed, and respects you enough to tell you the truth. Confident, specific, direct, never cruel. Every sentence should either teach something or move something forward.`
+Write like a respected A&R executive with engineering fluency. Not a cheerleader, not an academic, not a generic AI assistant. Confident, specific, direct, never cruel. Every sentence should either teach something or move something forward.`
+
+export const maxDuration = 60
 
 export async function POST(request) {
   try {
     const { audioInfo, question } = await request.json()
 
-    const message = await client.messages.create({
+    const stream = await client.messages.stream({
       model: 'claude-sonnet-4-5',
       max_tokens: 2500,
       system: DUCER_SYSTEM_PROMPT,
@@ -130,7 +132,26 @@ Generate the full Ducer report.`
       }]
     })
 
-    return Response.json({ report: message.content[0].text })
+    const encoder = new TextEncoder()
+
+    const readable = new ReadableStream({
+      async start(controller) {
+        for await (const chunk of stream) {
+          if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
+            controller.enqueue(encoder.encode(chunk.delta.text))
+          }
+        }
+        controller.close()
+      }
+    })
+
+    return new Response(readable, {
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Transfer-Encoding': 'chunked',
+      }
+    })
+
   } catch (error) {
     console.error('Analysis error:', error)
     return Response.json({ error: error.message }, { status: 500 })
