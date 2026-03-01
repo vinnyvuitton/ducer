@@ -55,7 +55,7 @@ export default function Home() {
         <div className="flex flex-col items-center justify-center min-h-screen px-4">
           <p className="text-xs tracking-[0.3em] text-gray-500 uppercase mb-4">Music Analysis</p>
           <h1 className="text-7xl font-black tracking-tighter mb-3">DUCER</h1>
-          <p className="text-gray-400 mb-16">Upload your song. {randomTagline}</p>
+          <p className="text-gray-400 mb-16">{randomTagline}</p>
 
           <div
             onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
@@ -76,7 +76,7 @@ export default function Home() {
                 <p className="text-gray-600 text-xs mt-1">or click to browse</p>
               </>
             )}
-            <input id="fileInput" type="file" accept="audio/*" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
+            <input id="fileInput" type="file" accept=".mp3,.wav,.aiff,.aif,.flac,.m4a,.ogg,.wma,.aac" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
           </div>
 
           {file && (
