@@ -29,6 +29,8 @@ export default function Home() {
   const [email, setEmail] = useState('')
   const [submitted, setSubmitted] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<any>(null)
+  const [loadingStep, setLoadingStep] = useState('')
 
   const handleFile = (f: any) => {
     if (f && f.type.startsWith('audio/')) {
@@ -40,12 +42,38 @@ export default function Home() {
   const analyze = async () => {
     if (!file) return
     setLoading(true)
-    const formData = new FormData()
-    formData.append('audio', file)
-    formData.append('question', question)
-    const res = await fetch('/api/analyze', { method: 'POST', body: formData })
-    const data = await res.json()
-    setReport(data.report)
+    setError(null)
+    setLoadingStep('Uploading your track...')
+
+    const timeout = setTimeout(() => {
+      setLoading(false)
+      setError('This is taking longer than expected. Please try again — large files can sometimes time out.')
+    }, 90000)
+
+    try {
+      setLoadingStep('Analyzing audio...')
+      const formData = new FormData()
+      formData.append('audio', file)
+      formData.append('question', question)
+
+      const res = await fetch('/api/analyze', { method: 'POST', body: formData })
+      const data = await res.json()
+
+      clearTimeout(timeout)
+
+      if (data.error) {
+        setError('Something went wrong during analysis. Please try again.')
+        setLoading(false)
+        return
+      }
+
+      setLoadingStep('Building your report...')
+      setReport(data.report)
+    } catch (err) {
+      clearTimeout(timeout)
+      setError('Connection error. Please check your internet and try again.')
+    }
+
     setLoading(false)
   }
 
@@ -113,13 +141,26 @@ export default function Home() {
               </button>
             </>
           )}
+
+          {error && (
+            <div className="mt-6 w-full max-w-md bg-red-950 border border-red-800 rounded-xl px-5 py-4">
+              <p className="text-red-300 text-sm">{error}</p>
+              <button
+                onClick={() => setError(null)}
+                className="text-red-500 text-xs mt-2 underline"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
         </div>
       ) : loading ? (
         <div className="flex flex-col items-center justify-center min-h-screen">
           <h1 className="text-4xl font-black tracking-tighter mb-8">DUCER</h1>
           <div className="w-1 h-1 bg-white rounded-full animate-ping mb-6"></div>
-          <p className="text-gray-400 text-sm tracking-widest uppercase animate-pulse">Analyzing</p>
+          <p className="text-gray-400 text-sm tracking-widest uppercase animate-pulse">{loadingStep || 'Analyzing'}</p>
           <p className="text-gray-600 text-xs mt-3">{filename}</p>
+          <p className="text-gray-700 text-xs mt-8 max-w-xs text-center">This usually takes 20–40 seconds. Hang tight.</p>
         </div>
       ) : (
         <div className="max-w-2xl mx-auto px-6 py-16">
@@ -176,7 +217,7 @@ export default function Home() {
           </div>
 
           <button
-            onClick={() => { setReport(null); setFile(null); setFilename(''); setQuestion(''); setName(''); setEmail(''); setSubmitted(false) }}
+            onClick={() => { setReport(null); setFile(null); setFilename(''); setQuestion(''); setName(''); setEmail(''); setSubmitted(false); setError(null) }}
             className="mt-8 border border-gray-700 text-gray-500 px-8 py-3 rounded-full text-xs tracking-widest uppercase hover:border-gray-500 hover:text-gray-300 transition-all"
           >
             Analyze Another Track
