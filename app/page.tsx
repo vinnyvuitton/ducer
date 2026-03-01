@@ -25,6 +25,10 @@ export default function Home() {
   const [loading, setLoading] = useState(false)
   const [report, setReport] = useState<any>(null)
   const [filename, setFilename] = useState('')
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [submitted, setSubmitted] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
 
   const handleFile = (f: any) => {
     if (f && f.type.startsWith('audio/')) {
@@ -47,6 +51,18 @@ export default function Home() {
 
   const handleKeyDown = (e: any) => {
     if (e.key === 'Enter') analyze()
+  }
+
+  const sendReport = async () => {
+    if (!name || !email) return
+    setSubmitting(true)
+    await fetch('/api/send-report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, email, filename, report })
+    })
+    setSubmitted(true)
+    setSubmitting(false)
   }
 
   return (
@@ -127,9 +143,41 @@ export default function Home() {
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{report}</ReactMarkdown>
           </div>
 
+          <div className="mt-16 border border-gray-800 rounded-2xl p-8">
+            {submitted ? (
+              <p className="text-gray-400 text-sm text-center">Got it. Check your inbox.</p>
+            ) : (
+              <>
+                <p className="text-white font-bold mb-1">Want a copy of this report?</p>
+                <p className="text-gray-500 text-sm mb-6">Leave your name and email and we'll send it over.</p>
+                <input
+                  type="text"
+                  placeholder="Your name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="w-full bg-transparent border border-gray-700 rounded-xl px-4 py-3 text-white placeholder-gray-600 text-sm focus:outline-none focus:border-gray-500 mb-3"
+                />
+                <input
+                  type="email"
+                  placeholder="Your email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full bg-transparent border border-gray-700 rounded-xl px-4 py-3 text-white placeholder-gray-600 text-sm focus:outline-none focus:border-gray-500 mb-4"
+                />
+                <button
+                  onClick={sendReport}
+                  disabled={submitting || !name || !email}
+                  className="w-full bg-white text-black font-bold py-3 rounded-full text-sm tracking-wide hover:bg-gray-100 transition-all disabled:opacity-40"
+                >
+                  {submitting ? 'Sending...' : 'Send me this report'}
+                </button>
+              </>
+            )}
+          </div>
+
           <button
-            onClick={() => { setReport(null); setFile(null); setFilename(''); setQuestion('') }}
-            className="mt-16 border border-gray-700 text-gray-500 px-8 py-3 rounded-full text-xs tracking-widest uppercase hover:border-gray-500 hover:text-gray-300 transition-all"
+            onClick={() => { setReport(null); setFile(null); setFilename(''); setQuestion(''); setName(''); setEmail(''); setSubmitted(false) }}
+            className="mt-8 border border-gray-700 text-gray-500 px-8 py-3 rounded-full text-xs tracking-widest uppercase hover:border-gray-500 hover:text-gray-300 transition-all"
           >
             Analyze Another Track
           </button>
