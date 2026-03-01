@@ -43,22 +43,40 @@ export default function Home() {
     if (!file) return
     setLoading(true)
     setError(null)
-    setLoadingStep('Uploading your track...')
+    setLoadingStep('Reading your track...')
 
     const timeout = setTimeout(() => {
       setLoading(false)
-      setError('This is taking longer than expected. Please try again — large files can sometimes time out.')
+      setError('This is taking longer than expected. Please try again.')
     }, 90000)
 
     try {
-      setLoadingStep('Analyzing audio...')
-      const formData = new FormData()
-      formData.append('audio', file)
-      formData.append('question', question)
+      const { parseBlob } = await import('music-metadata-browser')
+      setLoadingStep('Extracting audio data...')
+      const metadata = await parseBlob(file)
 
-      const res = await fetch('/api/analyze', { method: 'POST', body: formData })
+      const audioInfo = `
+Filename: ${file.name}
+Format: ${metadata.format.container || 'unknown'}
+Duration: ${metadata.format.duration ? Math.round(metadata.format.duration) + ' seconds' : 'unknown'}
+Bitrate: ${metadata.format.bitrate ? Math.round(metadata.format.bitrate / 1000) + ' kbps' : 'unknown'}
+Sample Rate: ${metadata.format.sampleRate || 'unknown'} Hz
+Channels: ${metadata.format.numberOfChannels || 'unknown'}
+Title: ${metadata.common.title || 'unknown'}
+Artist: ${metadata.common.artist || 'unknown'}
+Genre: ${metadata.common.genre?.[0] || 'unknown'}
+BPM: ${metadata.common.bpm || 'unknown'}
+Key: ${metadata.common.key || 'unknown'}
+      `.trim()
+
+      setLoadingStep('Analyzing...')
+      const res = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audioInfo, question: question || 'Give me a full analysis' })
+      })
+
       const data = await res.json()
-
       clearTimeout(timeout)
 
       if (data.error) {
@@ -67,11 +85,10 @@ export default function Home() {
         return
       }
 
-      setLoadingStep('Building your report...')
       setReport(data.report)
     } catch (err) {
       clearTimeout(timeout)
-      setError('Connection error. Please check your internet and try again.')
+      setError('Something went wrong. Please try again.')
     }
 
     setLoading(false)
@@ -145,12 +162,7 @@ export default function Home() {
           {error && (
             <div className="mt-6 w-full max-w-md bg-red-950 border border-red-800 rounded-xl px-5 py-4">
               <p className="text-red-300 text-sm">{error}</p>
-              <button
-                onClick={() => setError(null)}
-                className="text-red-500 text-xs mt-2 underline"
-              >
-                Dismiss
-              </button>
+              <button onClick={() => setError(null)} className="text-red-500 text-xs mt-2 underline">Dismiss</button>
             </div>
           )}
         </div>

@@ -1,42 +1,10 @@
-export const config = {
-  api: {
-    bodyParser: {
-      sizeLimit: '50mb',
-    },
-  },
-}
-
 import Anthropic from '@anthropic-ai/sdk'
-import * as mm from 'music-metadata'
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
 export async function POST(request) {
   try {
-    const formData = await request.formData()
-    const file = formData.get('audio')
-    const question = formData.get('question') || 'Give me a full analysis'
-
-    if (!file) return Response.json({ error: 'No file uploaded' }, { status: 400 })
-
-    const bytes = await file.arrayBuffer()
-    const buffer = Buffer.from(bytes)
-
-    const metadata = await mm.parseBuffer(buffer, file.type)
-
-    const audioInfo = `
-Filename: ${file.name}
-Format: ${metadata.format.container || 'unknown'}
-Duration: ${metadata.format.duration ? Math.round(metadata.format.duration) + ' seconds' : 'unknown'}
-Bitrate: ${metadata.format.bitrate ? Math.round(metadata.format.bitrate / 1000) + ' kbps' : 'unknown'}
-Sample Rate: ${metadata.format.sampleRate || 'unknown'} Hz
-Channels: ${metadata.format.numberOfChannels || 'unknown'}
-Title: ${metadata.common.title || 'unknown'}
-Artist: ${metadata.common.artist || 'unknown'}
-Genre: ${metadata.common.genre?.[0] || 'unknown'}
-BPM: ${metadata.common.bpm || 'unknown'}
-Key: ${metadata.common.key || 'unknown'}
-    `.trim()
+    const { audioInfo, question } = await request.json()
 
     const message = await client.messages.create({
       model: 'claude-opus-4-5',
