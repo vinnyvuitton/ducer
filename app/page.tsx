@@ -3,6 +3,21 @@ import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
+const taglines = [
+  "Find out what you've got.",
+  "Get the full picture.",
+  "Hear the truth.",
+  "Know exactly where it stands.",
+  "Get a real answer.",
+  "See what's really there.",
+  "Get the honest read.",
+  "Understand what you made.",
+  "Get the breakdown.",
+  "Know what you're working with.",
+]
+
+const randomTagline = taglines[Math.floor(Math.random() * taglines.length)]
+
 export default function Home() {
   const [file, setFile] = useState<any>(null)
   const [dragging, setDragging] = useState(false)
@@ -40,7 +55,7 @@ export default function Home() {
         <div className="flex flex-col items-center justify-center min-h-screen px-4">
           <p className="text-xs tracking-[0.3em] text-gray-500 uppercase mb-4">Music Analysis</p>
           <h1 className="text-7xl font-black tracking-tighter mb-3">DUCER</h1>
-          <p className="text-gray-400 mb-16">Upload your song. Find out everything.</p>
+          <p className="text-gray-400 mb-16">Upload your song. {randomTagline}</p>
 
           <div
             onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
