@@ -255,4 +255,3 @@ Key: ${metadata.common.key || 'unknown'}
     </main>
   )
 }
-EOF
