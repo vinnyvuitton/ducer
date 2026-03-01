@@ -1,3 +1,4 @@
+cat > app/page.tsx << 'EOF'
 'use client'
 import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
@@ -55,11 +56,6 @@ export default function Home() {
     setError(null)
     setLoadingStep('Reading your track...')
 
-    const timeout = setTimeout(() => {
-      setLoading(false)
-      setError('This is taking longer than expected. Please try again.')
-    }, 90000)
-
     try {
       const { parseBlob } = await import('music-metadata-browser')
       setLoadingStep('Extracting audio data...')
@@ -80,24 +76,35 @@ Key: ${metadata.common.key || 'unknown'}
       `.trim()
 
       setLoadingStep('Analyzing...')
+
       const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ audioInfo, question: question || 'Give me a full analysis' })
       })
 
-      const data = await res.json()
-      clearTimeout(timeout)
-
-      if (data.error) {
-        setError('Something went wrong during analysis. Please try again.')
-        setLoading(false)
-        return
+      if (!res.ok) {
+        throw new Error('Analysis failed')
       }
 
-      setReport(data.report)
+      const reader = res.body?.getReader()
+      const decoder = new TextDecoder()
+      let fullText = ''
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          fullText += decoder.decode(value, { stream: true })
+        }
+      }
+
+      if (!fullText) {
+        throw new Error('Empty response')
+      }
+
+      setReport(fullText)
     } catch (err) {
-      clearTimeout(timeout)
       setError('Something went wrong. Please try again.')
     }
 
@@ -249,3 +256,4 @@ Key: ${metadata.common.key || 'unknown'}
     </main>
   )
 }
+EOF
