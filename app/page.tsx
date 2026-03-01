@@ -1,4 +1,3 @@
-cat > app/page.tsx << 'EOF'
 'use client'
 import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
