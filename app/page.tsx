@@ -45,15 +45,27 @@ function parseReport(text: string) {
   const sections: any = {}
   SECTIONS.forEach((s, i) => {
     const nextSection = SECTIONS[i + 1]
-    const startMarker = `## ${s.id}.`
-    const endMarker = nextSection ? `## ${nextSection.id}.` : null
-    const startIdx = text.indexOf(startMarker)
-    if (startIdx === -1) return
-    const endIdx = endMarker ? text.indexOf(endMarker) : text.length
-    const content = text.slice(startIdx, endIdx === -1 ? text.length : endIdx).trim()
-    sections[s.id] = content
+    const startRegex = new RegExp(`##\\s*${s.id}[.\\s]`)
+    const startMatch = text.search(startRegex)
+    if (startMatch === -1) return
+    let endMatch = text.length
+    if (nextSection) {
+      const endRegex = new RegExp(`##\\s*${nextSection.id}[.\\s]`)
+      const found = text.search(endRegex)
+      if (found !== -1) endMatch = found
+    }
+    sections[s.id] = text.slice(startMatch, endMatch).trim()
   })
   return sections
+}
+
+function getActiveSection(text: string) {
+  let active = 1
+  SECTIONS.forEach(s => {
+    const regex = new RegExp(`##\\s*${s.id}[.\\s]`)
+    if (regex.test(text)) active = s.id
+  })
+  return active
 }
 
 function SectionBlock({ section, content, isActive, visible }: any) {
@@ -73,7 +85,12 @@ function SectionBlock({ section, content, isActive, visible }: any) {
     if (overallMatch) scores.overall = parseInt(overallMatch[1])
   }
 
-  const cleanContent = content ? content.replace(/^##\s+\d+\.\s+[^\n]+\n/, '').trim() : ''
+  const cleanContent = content
+    ? content.replace(/^##\s+\d+[.\s][^\n]*\n/, '').trim()
+    : ''
+
+  const cleanLine = (line: string) =>
+    line.replace(/\*\*/g, '').replace(/^###\s*\d*\.?\s*/, '').trim()
 
   return (
     <div style={{
@@ -111,7 +128,7 @@ function SectionBlock({ section, content, isActive, visible }: any) {
             {[['File', scores.file], ['Sound', scores.sound], ['Craft', scores.craft], ['Market', scores.market]].map(([label, score]: any) => (
               <div key={label} style={{ background: 'rgba(0,0,0,0.3)', padding: '14px', textAlign: 'center' }}>
                 <div style={{ fontFamily: 'monospace', fontSize: '9px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#555', marginBottom: '8px' }}>{label}</div>
-                <div style={{ fontFamily: 'sans-serif', fontWeight: 900, fontSize: '36px', color: '#c8ff00', lineHeight: 1 }}>
+                <div style={{ fontWeight: 900, fontSize: '36px', color: '#c8ff00', lineHeight: 1 }}>
                   {score}<span style={{ fontSize: '16px', color: '#333' }}>/10</span>
                 </div>
               </div>
@@ -119,23 +136,27 @@ function SectionBlock({ section, content, isActive, visible }: any) {
           </div>
           {scores.overall > 0 && (
             <div style={{ padding: '16px 20px', borderBottom: '1px solid rgba(200,255,0,0.1)', display: 'flex', alignItems: 'center', gap: '16px' }}>
-              <span style={{ fontFamily: 'monospace', fontSize: '10px', letterSpacing: '0.2em', color: '#555', textTransform: 'uppercase' }}>Overall Score</span>
+              <span style={{ fontFamily: 'monospace', fontSize: '10px', letterSpacing: '0.2em', color: '#555', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Overall Score</span>
               <div style={{ flex: 1, height: '2px', background: '#1a1a1a' }}>
                 <div style={{ height: '100%', background: '#c8ff00', width: `${scores.overall * 10}%`, transition: 'width 1.5s cubic-bezier(0.16,1,0.3,1)' }} />
               </div>
-              <span style={{ fontFamily: 'sans-serif', fontWeight: 900, fontSize: '28px', color: '#c8ff00' }}>{scores.overall}.0</span>
+              <span style={{ fontWeight: 900, fontSize: '28px', color: '#c8ff00' }}>{scores.overall}.0</span>
             </div>
           )}
           <div style={{ padding: '20px', color: '#aaa', fontSize: '13px', lineHeight: 1.8 }}>
-            {cleanContent.split('\n').filter((l: string) => l.trim()).map((line: string, i: number) => (
-              <p key={i} style={{ marginBottom: '10px' }}>{line.replace(/\*\*/g, '')}</p>
-            ))}
+            {cleanContent.split('\n').filter((l: string) => l.trim()).map((line: string, i: number) => {
+              const cl = cleanLine(line)
+              if (!cl) return null
+              return <p key={i} style={{ marginBottom: '10px' }}>{cl}</p>
+            })}
           </div>
         </div>
       ) : content ? (
         <div style={{ padding: '20px', color: '#aaa', fontSize: '13px', lineHeight: 1.8 }}>
           {cleanContent.split('\n').filter((l: string) => l.trim()).map((line: string, i: number) => {
-            const isWarning = line.includes('⚠') || line.includes('warning') || line.toLowerCase().includes('flag')
+            const cl = cleanLine(line)
+            if (!cl) return null
+            const isWarning = cl.includes('⚠') || cl.toLowerCase().includes('flag') || cl.toLowerCase().includes('warning')
             return (
               <p key={i} style={{
                 marginBottom: '10px',
@@ -143,7 +164,7 @@ function SectionBlock({ section, content, isActive, visible }: any) {
                 fontFamily: isWarning ? 'monospace' : 'inherit',
                 fontSize: isWarning ? '11px' : '13px',
               }}>
-                {line.replace(/\*\*/g, '')}
+                {cl}
               </p>
             )
           })}
@@ -180,14 +201,6 @@ export default function Home() {
     }
   }
 
-  const getActiveSection = (text: string) => {
-    let active = 1
-    SECTIONS.forEach(s => {
-      if (text.includes(`## ${s.id}.`)) active = s.id
-    })
-    return active
-  }
-
   const analyze = async () => {
     if (!file) return
     setLoading(true)
@@ -221,6 +234,7 @@ Key: ${metadata.common.key || 'unknown'}
         body: JSON.stringify({ audioInfo, question: question || 'Give me a full analysis' })
       })
 
+      if (!res.ok) throw new Error(`Server error: ${res.status}`)
       if (!res.body) throw new Error('No response body')
 
       const reader = res.body.getReader()
@@ -235,18 +249,18 @@ Key: ${metadata.common.key || 'unknown'}
 
         const active = getActiveSection(reportRef.current)
         setVisibleSections(prev => {
-          const newSections = [...prev]
-          for (let i = 1; i <= active; i++) {
-            if (!newSections.includes(i)) newSections.push(i)
+          const updated = [...prev]
+          for (let i = 1; i <= active + 1; i++) {
+            if (!updated.includes(i)) updated.push(i)
           }
-          return newSections
+          return updated
         })
       }
 
       setVisibleSections(SECTIONS.map(s => s.id))
       setDone(true)
-    } catch (err) {
-      setError('Something went wrong. Please try again.')
+    } catch (err: any) {
+      setError(err.message || 'Something went wrong. Please try again.')
     }
 
     setLoading(false)
@@ -375,13 +389,13 @@ Key: ${metadata.common.key || 'unknown'}
           <p style={{ fontFamily: 'monospace', fontSize: '11px', color: '#555', marginTop: '4px' }}>{filename}</p>
         </div>
         <div style={{ textAlign: 'right' }}>
-          <p style={{ fontFamily: 'monospace', fontSize: '10px', color: '#333' }}>
-            {loading ? (
-              <span style={{ color: '#c8ff00' }}>● ANALYZING</span>
-            ) : (
-              <span style={{ color: '#555' }}>● COMPLETE</span>
-            )}
-          </p>
+          {loading ? (
+            <span style={{ fontFamily: 'monospace', fontSize: '10px', color: '#c8ff00', letterSpacing: '0.15em' }}>● ANALYZING</span>
+          ) : done ? (
+            <span style={{ fontFamily: 'monospace', fontSize: '10px', color: '#c8ff00', letterSpacing: '0.15em' }}>● COMPLETE</span>
+          ) : (
+            <span style={{ fontFamily: 'monospace', fontSize: '10px', color: '#333', letterSpacing: '0.15em' }}>● READY</span>
+          )}
         </div>
       </div>
 
