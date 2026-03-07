@@ -17,22 +17,20 @@ export async function POST(request) {
       ? `Your Ducer report for ${filename}`
       : 'Your Ducer report'
 
-    const html = `
-      <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #111;">
-        <p>Hey ${name},</p>
-        <p>Here's your Ducer report${filename ? ` for <strong>${filename}</strong>` : ''}.</p>
-        <hr style="margin: 24px 0;" />
-        <pre style="white-space: pre-wrap; font-family: Arial, sans-serif;">${escapeHtml(report)}</pre>
-      </div>
-    `
+    // Parse the raw report text into structured sections for clean HTML rendering
+    const cleanReport = sanitizeReport(report)
+    const sections = parseSections(cleanReport)
+    const year = new Date().getFullYear()
+
+    const html = buildEmailHtml({ name, filename, sections, year })
 
     const { data, error } = await resend.emails.send({
       from: 'Ducer <reports@ducer.app>',
       to: [email],
       bcc: ['vinny.olsauskas@gmail.com'],
+      replyTo: 'reports@ducer.app',
       subject,
       html,
-      replyTo: 'vinny.olsauskas@gmail.com',
     })
 
     if (error) {
@@ -50,8 +48,161 @@ export async function POST(request) {
   }
 }
 
+// Remove em dashes, standalone --- lines, markdown bold, excessive whitespace
+function sanitizeReport(text = '') {
+  return text
+    .replace(/\u2014/g, '-')     // em dash to hyphen
+    .replace(/--/g, '-')         // double hyphen cleanup
+    .replace(/\n-{3,}\n/g, '\n') // remove standalone --- dividers
+    .replace(/\*\*/g, '')        // remove markdown bold
+    .replace(/\n{3,}/g, '\n\n') // max two consecutive newlines
+}
+
+// Split report into numbered sections: { id, label, content }
+function parseSections(text = '') {
+  const sectionRegex = /##\s*(\d+)[.\s]+([^\n]+)\n([\s\S]*?)(?=##\s*\d+[.\s]|$)/g
+  const sections = []
+  let match
+  while ((match = sectionRegex.exec(text)) !== null) {
+    const id = parseInt(match[1])
+    const label = match[2].trim()
+    const content = match[3].trim()
+    if (content) sections.push({ id, label, content })
+  }
+  return sections
+}
+
+function buildEmailHtml({ name, filename, sections, year }) {
+  const sectionHtml = sections.map(({ id, label, content }) => {
+    const isVerdict = id === 12
+
+    // Parse scores out of verdict section
+    let verdictScores = null
+    if (isVerdict) {
+      const fileMatch = content.match(/File[:\s]+(\d+)/i)
+      const soundMatch = content.match(/Sound[:\s]+(\d+)/i)
+      const craftMatch = content.match(/Craft[:\s]+(\d+)/i)
+      const marketMatch = content.match(/Market[:\s]+(\d+)/i)
+      const overallMatch = content.match(/Overall[^:]*:[^\d]*(\d+(?:\.\d+)?)/i)
+      if (fileMatch && soundMatch && craftMatch && marketMatch) {
+        verdictScores = {
+          file: fileMatch[1],
+          sound: soundMatch[1],
+          craft: craftMatch[1],
+          market: marketMatch[1],
+          overall: overallMatch ? overallMatch[1] : null,
+        }
+      }
+    }
+
+    const paragraphs = content
+      .split('\n')
+      .filter(l => {
+        const t = l.trim()
+        return t && !/^-{2,}$/.test(t)
+      })
+      .map(l => {
+        const t = l.trim()
+        // Bold sub-labels (lines ending in colon or starting with a keyword pattern)
+        if (/^[A-Z][^a-z]{0,30}:/.test(t)) {
+          const [head, ...rest] = t.split(':')
+          return `<p style="margin:0 0 10px;color:#cccccc;font-size:13px;line-height:1.7;"><strong style="color:#ffffff;">${escapeHtml(head)}:</strong>${escapeHtml(rest.join(':'))}</p>`
+        }
+        return `<p style="margin:0 0 10px;color:#cccccc;font-size:13px;line-height:1.7;">${escapeHtml(t)}</p>`
+      })
+      .join('')
+
+    const scoresHtml = verdictScores ? `
+      <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-bottom:20px;">
+        <tr>
+          ${['File', 'Sound', 'Craft', 'Market'].map(cat => `
+          <td width="25%" style="padding:0 4px 0 0;text-align:center;">
+            <div style="background:#111111;padding:16px 8px;border:1px solid #1f1f1f;">
+              <div style="font-family:monospace;font-size:9px;letter-spacing:0.2em;text-transform:uppercase;color:#555555;margin-bottom:8px;">${cat}</div>
+              <div style="font-size:32px;font-weight:900;color:#c8ff00;line-height:1;">${verdictScores[cat.toLowerCase()]}<span style="font-size:14px;color:#333;">/10</span></div>
+            </div>
+          </td>`).join('')}
+        </tr>
+      </table>
+      ${verdictScores.overall ? `
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;padding:14px 16px;background:#111111;border:1px solid #1f1f1f;">
+        <span style="font-family:monospace;font-size:10px;letter-spacing:0.15em;color:#555;text-transform:uppercase;white-space:nowrap;">Overall Score</span>
+        <div style="flex:1;height:2px;background:#1a1a1a;">
+          <div style="height:2px;background:#c8ff00;width:${parseFloat(verdictScores.overall) * 10}%;"></div>
+        </div>
+        <span style="font-size:24px;font-weight:900;color:#c8ff00;">${verdictScores.overall}</span>
+      </div>` : ''}
+    ` : ''
+
+    return `
+    <div style="margin-bottom:2px;border:1px solid ${isVerdict ? '#c8ff00' : '#1f1f1f'};background:${isVerdict ? '#0d1100' : '#0f0f0f'};">
+      <div style="padding:12px 18px;border-bottom:1px solid ${isVerdict ? 'rgba(200,255,0,0.2)' : '#1a1a1a'};background:${isVerdict ? 'rgba(200,255,0,0.04)' : '#0c0c0c'};">
+        <span style="font-family:monospace;font-size:9px;color:#333;letter-spacing:0.15em;margin-right:14px;">${String(id).padStart(2, '0')}</span>
+        <span style="font-family:monospace;font-size:10px;letter-spacing:0.2em;color:${isVerdict ? '#c8ff00' : '#555'};text-transform:uppercase;">${escapeHtml(label)}</span>
+      </div>
+      <div style="padding:18px;">
+        ${scoresHtml}
+        ${paragraphs}
+      </div>
+    </div>`
+  }).join('')
+
+  return `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ducer Report</title>
+</head>
+<body style="margin:0;padding:0;background:#080808;font-family:Arial,Helvetica,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#080808;padding:40px 20px;">
+    <tr>
+      <td align="center">
+        <table width="100%" style="max-width:680px;" cellpadding="0" cellspacing="0">
+
+          <!-- Header -->
+          <tr>
+            <td style="padding-bottom:32px;border-bottom:1px solid #1a1a1a;">
+              <p style="margin:0 0 4px;font-family:monospace;font-size:9px;letter-spacing:0.3em;color:#555;text-transform:uppercase;">Music Intelligence Report</p>
+              <h1 style="margin:0;font-size:48px;font-weight:900;letter-spacing:-2px;color:#e8e8e8;line-height:1;">DUCER</h1>
+              ${filename ? `<p style="margin:6px 0 0;font-family:monospace;font-size:11px;color:#444;">${escapeHtml(filename)}</p>` : ''}
+            </td>
+          </tr>
+
+          <!-- Greeting -->
+          <tr>
+            <td style="padding:28px 0 24px;">
+              <p style="margin:0 0 10px;font-size:14px;color:#aaaaaa;line-height:1.6;">Hey ${escapeHtml(name)},</p>
+              <p style="margin:0;font-size:14px;color:#aaaaaa;line-height:1.6;">Your full Ducer intelligence report is below${filename ? ` for <strong style="color:#e8e8e8;">${escapeHtml(filename)}</strong>` : ''}. This is your track. No filter.</p>
+            </td>
+          </tr>
+
+          <!-- Report Sections -->
+          <tr>
+            <td>
+              ${sectionHtml}
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding-top:40px;border-top:1px solid #1a1a1a;text-align:center;">
+              <p style="margin:0 0 4px;font-family:monospace;font-size:16px;font-weight:900;letter-spacing:-0.5px;color:#e8e8e8;">DUCER</p>
+              <p style="margin:0;font-family:monospace;font-size:9px;letter-spacing:0.2em;color:#333;text-transform:uppercase;">Music Intelligence &copy; ${year}</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`
+}
+
 function escapeHtml(str = '') {
-  return str
+  return String(str)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')

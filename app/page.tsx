@@ -1,5 +1,5 @@
 'use client'
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 
 const taglines = [
   "The honest read on your music.",
@@ -25,6 +25,23 @@ const taglines = [
 ]
 
 const randomTagline = taglines[Math.floor(Math.random() * taglines.length)]
+
+// Word bank for loading bars — 20 unique words, shuffled per session, never repeated
+const LOADING_WORDS_BANK = [
+  'Analyzing', 'Evaluating', 'Decoding', 'Scanning', 'Examining',
+  'Processing', 'Dissecting', 'Mapping', 'Profiling', 'Assessing',
+  'Calibrating', 'Measuring', 'Diagnosing', 'Auditing', 'Charting',
+  'Parsing', 'Classifying', 'Benchmarking', 'Modeling', 'Investigating',
+]
+
+function shuffleArray<T>(arr: T[]): T[] {
+  const a = [...arr]
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]]
+  }
+  return a
+}
 
 const SECTIONS = [
   { id: 1, label: 'Song Identity' },
@@ -177,10 +194,10 @@ Stereo Correlation: ${correlation.toFixed(3)} — ${stereoDesc}
 Channels: ${numChannels === 1 ? 'Mono' : 'Stereo'}
 
 Frequency Band Energy (relative):
-  Sub bass (0–80 Hz):      ${bandPercents.sub}%
-  Low-mid (80–300 Hz):     ${bandPercents.lowMid}%
-  Mids (300 Hz–2 kHz):     ${bandPercents.mid}%
-  High (2–8 kHz):          ${bandPercents.high}%
+  Sub bass (0-80 Hz):      ${bandPercents.sub}%
+  Low-mid (80-300 Hz):     ${bandPercents.lowMid}%
+  Mids (300 Hz-2 kHz):     ${bandPercents.mid}%
+  High (2-8 kHz):          ${bandPercents.high}%
   Air (8 kHz+):            ${bandPercents.air}%
 ---`
 }
@@ -213,14 +230,55 @@ function getActiveSectionInBatch(text: string, sectionIds: number[]) {
 }
 
 function cleanLine(line: string) {
-  return line.replace(/\*\*/g, '').replace(/^###\s*\d*\.?\s*/, '').trim()
+  // Remove markdown bold, section headers, em dashes, and standalone --- lines
+  return line
+    .replace(/\*\*/g, '')
+    .replace(/^###\s*\d*\.?\s*/, '')
+    .replace(/\u2014/g, '-') // em dash → regular hyphen
+    .replace(/--/g, '-')     // double hyphen fallback
+    .trim()
 }
 
-function SectionBlock({ section, content, isActive, visible }: {
+function LoadingBar({ word }: { word: string }) {
+  const [progress, setProgress] = useState(0)
+
+  useEffect(() => {
+    setProgress(0)
+    // Animate to a random "stuck" point between 40-85% to feel realistic
+    const target = 40 + Math.random() * 45
+    const timer = setTimeout(() => setProgress(target), 50)
+    return () => clearTimeout(timer)
+  }, [word])
+
+  return (
+    <div style={{ padding: '20px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
+        <span style={{
+          fontFamily: 'monospace', fontSize: '10px', color: '#c8ff00',
+          letterSpacing: '0.2em', textTransform: 'uppercase',
+        }}>
+          {word}...
+        </span>
+      </div>
+      <div style={{ height: '1px', background: '#1a1a1a', width: '100%' }}>
+        <div style={{
+          height: '100%',
+          background: 'linear-gradient(90deg, #c8ff00, #a0cc00)',
+          width: `${progress}%`,
+          transition: 'width 1.8s cubic-bezier(0.16, 1, 0.3, 1)',
+          boxShadow: '0 0 8px rgba(200,255,0,0.4)',
+        }} />
+      </div>
+    </div>
+  )
+}
+
+function SectionBlock({ section, content, isActive, visible, loadingWord }: {
   section: { id: number; label: string }
   content?: string
   isActive: boolean
   visible: boolean
+  loadingWord: string
 }) {
   const isVerdict = section.id === 12
 
@@ -241,6 +299,16 @@ function SectionBlock({ section, content, isActive, visible }: {
   const cleanContent = content
     ? content.replace(/^##\s*\d+[.\s][^\n]*\n/, '').trim()
     : ''
+
+  // Filter out standalone --- lines and clean em dashes
+  const cleanLines = cleanContent
+    .split('\n')
+    .filter(l => {
+      const trimmed = l.trim()
+      if (!trimmed) return false
+      if (/^-{2,}$/.test(trimmed)) return false // remove --- lines
+      return true
+    })
 
   return (
     <div style={{
@@ -270,7 +338,9 @@ function SectionBlock({ section, content, isActive, visible }: {
         }} />
       </div>
 
-      {isVerdict && content ? (
+      {isActive && !content ? (
+        <LoadingBar word={loadingWord} />
+      ) : isVerdict && content ? (
         <div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '2px', padding: '20px', borderBottom: '1px solid rgba(200,255,0,0.1)' }}>
             {(['File', 'Sound', 'Craft', 'Market'] as const).map(label => (
@@ -292,7 +362,7 @@ function SectionBlock({ section, content, isActive, visible }: {
             </div>
           )}
           <div style={{ padding: '20px', color: '#aaa', fontSize: '13px', lineHeight: 1.8 }}>
-            {cleanContent.split('\n').filter(l => l.trim()).map((line, i) => {
+            {cleanLines.map((line, i) => {
               const cl = cleanLine(line)
               if (!cl) return null
               return <p key={i} style={{ marginBottom: '10px' }}>{cl}</p>
@@ -301,7 +371,7 @@ function SectionBlock({ section, content, isActive, visible }: {
         </div>
       ) : content ? (
         <div style={{ padding: '20px', color: '#aaa', fontSize: '13px', lineHeight: 1.8 }}>
-          {cleanContent.split('\n').filter(l => l.trim()).map((line, i) => {
+          {cleanLines.map((line, i) => {
             const cl = cleanLine(line)
             if (!cl) return null
             const isWarning = cl.includes('⚠') || cl.toLowerCase().includes('flag') || cl.toLowerCase().includes('warning')
@@ -317,7 +387,7 @@ function SectionBlock({ section, content, isActive, visible }: {
         </div>
       ) : (
         <div style={{ padding: '20px', color: '#2a2a2a', fontSize: '13px', fontFamily: 'monospace', letterSpacing: '0.1em' }}>
-          {isActive ? 'Analyzing...' : 'Pending'}
+          Pending
         </div>
       )}
     </div>
@@ -341,6 +411,52 @@ export default function Home() {
   const [sectionContents, setSectionContents] = useState<Record<number, string>>({})
   const [activeSection, setActiveSection] = useState<number>(0)
   const rawReportRef = useRef('')
+
+  // Loading word bank — shuffled once per session, words consumed in order
+  const wordQueueRef = useRef<string[]>([])
+  const wordIndexRef = useRef(0)
+  // Map section id -> assigned word so each section keeps its word stable
+  const sectionWordMapRef = useRef<Record<number, string>>({})
+
+  const initWordQueue = () => {
+    wordQueueRef.current = shuffleArray(LOADING_WORDS_BANK)
+    wordIndexRef.current = 0
+    sectionWordMapRef.current = {}
+  }
+
+  const getWordForSection = (sectionId: number): string => {
+    if (sectionWordMapRef.current[sectionId]) return sectionWordMapRef.current[sectionId]
+    const word = wordQueueRef.current[wordIndexRef.current % wordQueueRef.current.length] || 'Analyzing'
+    wordIndexRef.current++
+    sectionWordMapRef.current[sectionId] = word
+    return word
+  }
+
+  // Scroll lock: prevent scrolling below the bottom of the active section block
+  const sectionRefs = useRef<Record<number, HTMLDivElement | null>>({})
+  const scrollLockRef = useRef(true)
+
+  useEffect(() => {
+    if (!loading) {
+      scrollLockRef.current = false
+      return
+    }
+    scrollLockRef.current = true
+
+    const handleScroll = () => {
+      if (!scrollLockRef.current || !activeSection) return
+      const el = sectionRefs.current[activeSection]
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      const maxScrollY = window.scrollY + rect.bottom - window.innerHeight + 20
+      if (window.scrollY > maxScrollY) {
+        window.scrollTo({ top: maxScrollY })
+      }
+    }
+
+    window.addEventListener('scroll', handleScroll, { passive: false })
+    return () => window.removeEventListener('scroll', handleScroll)
+  }, [loading, activeSection])
 
   const handleFile = (f: File | null | undefined) => {
     if (f && f.type.startsWith('audio/')) {
@@ -397,6 +513,8 @@ export default function Home() {
     setSectionContents({})
     setActiveSection(0)
     rawReportRef.current = ''
+    initWordQueue()
+    scrollLockRef.current = true
 
     try {
       const { parseBlob } = await import('music-metadata-browser')
@@ -435,10 +553,25 @@ ${audioFeatures}
       setDone(true)
     } catch (err: any) {
       setError(err.message || 'Something went wrong. Please try again.')
+      // Report error to Vinny via the alert endpoint
+      try {
+        await fetch('/api/alert-error', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: err.message || 'Unknown error',
+            filename: filename || 'unknown',
+            timestamp: new Date().toISOString(),
+          })
+        })
+      } catch (_) {
+        // silently fail — don't surface alert errors to user
+      }
     }
 
     setLoading(false)
     setLoadingStage('')
+    scrollLockRef.current = false
   }
 
   const sendReport = async () => {
@@ -482,6 +615,7 @@ ${audioFeatures}
     setLoading(false)
     setLoadingStage('')
     rawReportRef.current = ''
+    scrollLockRef.current = false
   }
 
   if (!loading && Object.keys(sectionContents).length === 0 && !done) {
@@ -600,13 +734,18 @@ ${audioFeatures}
 
       <div style={{ maxWidth: '960px', margin: '0 auto', padding: '40px' }}>
         {SECTIONS.map(section => (
-          <SectionBlock
+          <div
             key={section.id}
-            section={section}
-            content={sectionContents[section.id]}
-            isActive={loading && activeSection === section.id}
-            visible={visibleSections.includes(section.id)}
-          />
+            ref={el => { sectionRefs.current[section.id] = el }}
+          >
+            <SectionBlock
+              section={section}
+              content={sectionContents[section.id]}
+              isActive={loading && activeSection === section.id}
+              visible={visibleSections.includes(section.id)}
+              loadingWord={getWordForSection(section.id)}
+            />
+          </div>
         ))}
 
         {done && (
@@ -629,6 +768,7 @@ ${audioFeatures}
                   placeholder="Your email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && name && email && sendReport()}
                   style={{ width: '100%', background: 'transparent', border: '1px solid #1a1a1a', borderRadius: '10px', padding: '12px 16px', color: '#e8e8e8', fontSize: '13px', outline: 'none', marginBottom: '14px', fontFamily: 'sans-serif' }}
                 />
                 <button
