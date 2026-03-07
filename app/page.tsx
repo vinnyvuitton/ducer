@@ -27,48 +27,63 @@ const taglines = [
 const randomTagline = taglines[Math.floor(Math.random() * taglines.length)]
 
 const SECTIONS = [
-  { id: 1, key: 'SONG IDENTITY', label: 'Song Identity' },
-  { id: 2, key: 'FILE HEALTH', label: 'File Health & Technical Snapshot' },
-  { id: 3, key: 'WHAT THE FILE', label: 'What the File Is Actually Telling Us' },
-  { id: 4, key: 'STRUCTURAL', label: 'Structural Working Map' },
-  { id: 5, key: 'HOOK DURABILITY', label: 'Hook Durability' },
-  { id: 6, key: 'PRODUCTION', label: 'Production & Arrangement Intelligence' },
-  { id: 7, key: 'LYRICS', label: 'Lyrics Intelligence' },
-  { id: 8, key: 'LANE', label: 'Lane Classification' },
-  { id: 9, key: 'MARKET', label: 'Market & Release Positioning' },
-  { id: 10, key: 'TRAJECTORY', label: 'Trajectory Scenarios' },
-  { id: 11, key: 'RISK', label: 'Risk Factors' },
-  { id: 12, key: 'VERDICT', label: 'The Verdict' },
+  { id: 1, label: 'Song Identity' },
+  { id: 2, label: 'File Health & Technical Snapshot' },
+  { id: 3, label: 'What the File Is Actually Telling Us' },
+  { id: 4, label: 'Structural Working Map' },
+  { id: 5, label: 'Hook Durability' },
+  { id: 6, label: 'Production & Arrangement Intelligence' },
+  { id: 7, label: 'Lyrics Intelligence' },
+  { id: 8, label: 'Lane Classification' },
+  { id: 9, label: 'Market & Release Positioning' },
+  { id: 10, label: 'Trajectory Scenarios' },
+  { id: 11, label: 'Risk Factors' },
+  { id: 12, label: 'The Verdict' },
 ]
 
-function parseReport(text: string) {
-  const sections: any = {}
-  SECTIONS.forEach((s, i) => {
-    const nextSection = SECTIONS[i + 1]
-    const startRegex = new RegExp(`##\\s*${s.id}[.\\s]`)
+const BATCHES: Record<number, number[]> = {
+  1: [1, 2, 3, 4],
+  2: [5, 6, 7, 8],
+  3: [9, 10, 11, 12],
+}
+
+function parseReport(text: string, sectionIds: number[]) {
+  const sections: Record<number, string> = {}
+  sectionIds.forEach((id, i) => {
+    const nextId = sectionIds[i + 1]
+    const startRegex = new RegExp(`##\\s*${id}[.\\s]`)
     const startMatch = text.search(startRegex)
     if (startMatch === -1) return
     let endMatch = text.length
-    if (nextSection) {
-      const endRegex = new RegExp(`##\\s*${nextSection.id}[.\\s]`)
+    if (nextId) {
+      const endRegex = new RegExp(`##\\s*${nextId}[.\\s]`)
       const found = text.search(endRegex)
       if (found !== -1) endMatch = found
     }
-    sections[s.id] = text.slice(startMatch, endMatch).trim()
+    sections[id] = text.slice(startMatch, endMatch).trim()
   })
   return sections
 }
 
-function getActiveSection(text: string) {
-  let active = 1
-  SECTIONS.forEach(s => {
-    const regex = new RegExp(`##\\s*${s.id}[.\\s]`)
-    if (regex.test(text)) active = s.id
+function getActiveSectionInBatch(text: string, sectionIds: number[]) {
+  let active = sectionIds[0]
+  sectionIds.forEach(id => {
+    const regex = new RegExp(`##\\s*${id}[.\\s]`)
+    if (regex.test(text)) active = id
   })
   return active
 }
 
-function SectionBlock({ section, content, isActive, visible }: any) {
+function cleanLine(line: string) {
+  return line.replace(/\*\*/g, '').replace(/^###\s*\d*\.?\s*/, '').trim()
+}
+
+function SectionBlock({ section, content, isActive, visible }: {
+  section: { id: number; label: string }
+  content?: string
+  isActive: boolean
+  visible: boolean
+}) {
   const isVerdict = section.id === 12
 
   const scores = { file: 0, sound: 0, craft: 0, market: 0, overall: 0 }
@@ -86,11 +101,8 @@ function SectionBlock({ section, content, isActive, visible }: any) {
   }
 
   const cleanContent = content
-    ? content.replace(/^##\s+\d+[.\s][^\n]*\n/, '').trim()
+    ? content.replace(/^##\s*\d+[.\s][^\n]*\n/, '').trim()
     : ''
-
-  const cleanLine = (line: string) =>
-    line.replace(/\*\*/g, '').replace(/^###\s*\d*\.?\s*/, '').trim()
 
   return (
     <div style={{
@@ -102,9 +114,7 @@ function SectionBlock({ section, content, isActive, visible }: any) {
       transition: 'opacity 0.4s ease, transform 0.4s ease',
     }}>
       <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        padding: '14px 20px',
+        display: 'flex', alignItems: 'center', padding: '14px 20px',
         borderBottom: isVerdict ? '1px solid rgba(200,255,0,0.15)' : '1px solid #1a1a1a',
         background: isVerdict ? 'rgba(200,255,0,0.04)' : '#0c0c0c',
       }}>
@@ -125,11 +135,11 @@ function SectionBlock({ section, content, isActive, visible }: any) {
       {isVerdict && content ? (
         <div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '2px', padding: '20px', borderBottom: '1px solid rgba(200,255,0,0.1)' }}>
-            {[['File', scores.file], ['Sound', scores.sound], ['Craft', scores.craft], ['Market', scores.market]].map(([label, score]: any) => (
+            {(['File', 'Sound', 'Craft', 'Market'] as const).map(label => (
               <div key={label} style={{ background: 'rgba(0,0,0,0.3)', padding: '14px', textAlign: 'center' }}>
                 <div style={{ fontFamily: 'monospace', fontSize: '9px', letterSpacing: '0.2em', textTransform: 'uppercase', color: '#555', marginBottom: '8px' }}>{label}</div>
                 <div style={{ fontWeight: 900, fontSize: '36px', color: '#c8ff00', lineHeight: 1 }}>
-                  {score}<span style={{ fontSize: '16px', color: '#333' }}>/10</span>
+                  {scores[label.toLowerCase() as keyof typeof scores]}<span style={{ fontSize: '16px', color: '#333' }}>/10</span>
                 </div>
               </div>
             ))}
@@ -144,7 +154,7 @@ function SectionBlock({ section, content, isActive, visible }: any) {
             </div>
           )}
           <div style={{ padding: '20px', color: '#aaa', fontSize: '13px', lineHeight: 1.8 }}>
-            {cleanContent.split('\n').filter((l: string) => l.trim()).map((line: string, i: number) => {
+            {cleanContent.split('\n').filter(l => l.trim()).map((line, i) => {
               const cl = cleanLine(line)
               if (!cl) return null
               return <p key={i} style={{ marginBottom: '10px' }}>{cl}</p>
@@ -153,7 +163,7 @@ function SectionBlock({ section, content, isActive, visible }: any) {
         </div>
       ) : content ? (
         <div style={{ padding: '20px', color: '#aaa', fontSize: '13px', lineHeight: 1.8 }}>
-          {cleanContent.split('\n').filter((l: string) => l.trim()).map((line: string, i: number) => {
+          {cleanContent.split('\n').filter(l => l.trim()).map((line, i) => {
             const cl = cleanLine(line)
             if (!cl) return null
             const isWarning = cl.includes('⚠') || cl.toLowerCase().includes('flag') || cl.toLowerCase().includes('warning')
@@ -163,9 +173,7 @@ function SectionBlock({ section, content, isActive, visible }: any) {
                 color: isWarning ? '#ff8c00' : '#aaa',
                 fontFamily: isWarning ? 'monospace' : 'inherit',
                 fontSize: isWarning ? '11px' : '13px',
-              }}>
-                {cl}
-              </p>
+              }}>{cl}</p>
             )
           })}
         </div>
@@ -179,36 +187,81 @@ function SectionBlock({ section, content, isActive, visible }: any) {
 }
 
 export default function Home() {
-  const [file, setFile] = useState<any>(null)
+  const [file, setFile] = useState<File | null>(null)
   const [dragging, setDragging] = useState(false)
   const [question, setQuestion] = useState('')
   const [loading, setLoading] = useState(false)
-  const [rawReport, setRawReport] = useState('')
   const [filename, setFilename] = useState('')
   const [done, setDone] = useState(false)
-  const [error, setError] = useState<any>(null)
+  const [error, setError] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [submitted, setSubmitted] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [visibleSections, setVisibleSections] = useState<number[]>([])
-  const reportRef = useRef('')
+  const [sectionContents, setSectionContents] = useState<Record<number, string>>({})
+  const [activeBatch, setActiveBatch] = useState<number>(0)
+  const [activeSection, setActiveSection] = useState<number>(0)
+  const rawReportRef = useRef('')
 
-  const handleFile = (f: any) => {
+  const handleFile = (f: File | null | undefined) => {
     if (f && f.type.startsWith('audio/')) {
       setFile(f)
       setFilename(f.name)
     }
   }
 
+  const runBatch = async (batch: number, audioInfo: string, question: string) => {
+    setActiveBatch(batch)
+    const batchSections = BATCHES[batch]
+    setVisibleSections(prev => {
+      const updated = [...prev]
+      batchSections.forEach(id => { if (!updated.includes(id)) updated.push(id) })
+      return updated
+    })
+
+    const res = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ audioInfo, question, batch })
+    })
+
+    if (!res.ok) throw new Error(`Server error: ${res.status}`)
+    if (!res.body) throw new Error('No response body')
+
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let batchText = ''
+
+    while (true) {
+      const { done: streamDone, value } = await reader.read()
+      if (streamDone) break
+      const chunk = decoder.decode(value, { stream: true })
+      batchText += chunk
+      rawReportRef.current += chunk
+
+      const active = getActiveSectionInBatch(batchText, batchSections)
+      setActiveSection(active)
+
+      const parsed = parseReport(batchText, batchSections)
+      setSectionContents(prev => ({ ...prev, ...parsed }))
+    }
+
+    // Final parse to ensure all sections captured
+    const finalParsed = parseReport(batchText, batchSections)
+    setSectionContents(prev => ({ ...prev, ...finalParsed }))
+  }
+
   const analyze = async () => {
     if (!file) return
     setLoading(true)
     setError(null)
-    setRawReport('')
     setDone(false)
-    setVisibleSections([1])
-    reportRef.current = ''
+    setVisibleSections([])
+    setSectionContents({})
+    setActiveBatch(0)
+    setActiveSection(0)
+    rawReportRef.current = ''
 
     try {
       const { parseBlob } = await import('music-metadata-browser')
@@ -228,36 +281,15 @@ BPM: ${metadata.common.bpm || 'unknown'}
 Key: ${metadata.common.key || 'unknown'}
       `.trim()
 
-      const res = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ audioInfo, question: question || 'Give me a full analysis' })
-      })
+      const q = question || 'Give me a full analysis'
 
-      if (!res.ok) throw new Error(`Server error: ${res.status}`)
-      if (!res.body) throw new Error('No response body')
-
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-
-      while (true) {
-        const { done: streamDone, value } = await reader.read()
-        if (streamDone) break
-        const chunk = decoder.decode(value, { stream: true })
-        reportRef.current += chunk
-        setRawReport(prev => prev + chunk)
-
-        const active = getActiveSection(reportRef.current)
-        setVisibleSections(prev => {
-          const updated = [...prev]
-          for (let i = 1; i <= active + 1; i++) {
-            if (!updated.includes(i)) updated.push(i)
-          }
-          return updated
-        })
-      }
+      await runBatch(1, audioInfo, q)
+      await runBatch(2, audioInfo, q)
+      await runBatch(3, audioInfo, q)
 
       setVisibleSections(SECTIONS.map(s => s.id))
+      setActiveBatch(0)
+      setActiveSection(0)
       setDone(true)
     } catch (err: any) {
       setError(err.message || 'Something went wrong. Please try again.')
@@ -272,7 +304,7 @@ Key: ${metadata.common.key || 'unknown'}
     await fetch('/api/send-report', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, email, filename, report: rawReport })
+      body: JSON.stringify({ name, email, filename, report: rawReportRef.current })
     })
     setSubmitted(true)
     setSubmitting(false)
@@ -282,21 +314,20 @@ Key: ${metadata.common.key || 'unknown'}
     setFile(null)
     setFilename('')
     setQuestion('')
-    setRawReport('')
     setDone(false)
     setError(null)
     setName('')
     setEmail('')
     setSubmitted(false)
     setVisibleSections([])
+    setSectionContents({})
+    setActiveBatch(0)
+    setActiveSection(0)
     setLoading(false)
-    reportRef.current = ''
+    rawReportRef.current = ''
   }
 
-  const parsedSections = parseReport(rawReport)
-  const activeSection = loading ? getActiveSection(rawReport) : 0
-
-  if (!rawReport && !loading) {
+  if (!loading && Object.keys(sectionContents).length === 0 && !done) {
     return (
       <main style={{ minHeight: '100vh', background: '#080808', color: '#e8e8e8', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '16px', fontFamily: 'sans-serif' }}>
         <p style={{ fontFamily: 'monospace', fontSize: '10px', letterSpacing: '0.3em', color: '#555', textTransform: 'uppercase', marginBottom: '16px' }}>Music Analysis</p>
@@ -348,15 +379,11 @@ Key: ${metadata.common.key || 'unknown'}
                 fontFamily: 'sans-serif',
               }}
             />
-            <button
-              onClick={analyze}
-              style={{
-                marginTop: '12px', background: '#e8e8e8', color: '#080808',
-                fontWeight: 700, padding: '14px 48px', borderRadius: '100px',
-                border: 'none', cursor: 'pointer', fontSize: '13px',
-                letterSpacing: '0.05em',
-              }}
-            >
+            <button onClick={analyze} style={{
+              marginTop: '12px', background: '#e8e8e8', color: '#080808',
+              fontWeight: 700, padding: '14px 48px', borderRadius: '100px',
+              border: 'none', cursor: 'pointer', fontSize: '13px', letterSpacing: '0.05em',
+            }}>
               Analyze
             </button>
           </>
@@ -374,9 +401,7 @@ Key: ${metadata.common.key || 'unknown'}
 
   return (
     <main style={{ minHeight: '100vh', background: '#080808', color: '#e8e8e8', fontFamily: 'sans-serif' }}>
-      <style>{`
-        @keyframes pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
-      `}</style>
+      <style>{`@keyframes pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }`}</style>
 
       <div style={{
         borderBottom: '1px solid #1a1a1a', padding: '24px 40px 20px',
@@ -388,9 +413,11 @@ Key: ${metadata.common.key || 'unknown'}
           <h1 style={{ fontSize: '48px', fontWeight: 900, letterSpacing: '-2px', lineHeight: 1 }}>DUCER</h1>
           <p style={{ fontFamily: 'monospace', fontSize: '11px', color: '#555', marginTop: '4px' }}>{filename}</p>
         </div>
-        <div style={{ textAlign: 'right' }}>
+        <div>
           {loading ? (
-            <span style={{ fontFamily: 'monospace', fontSize: '10px', color: '#c8ff00', letterSpacing: '0.15em' }}>● ANALYZING</span>
+            <span style={{ fontFamily: 'monospace', fontSize: '10px', color: '#c8ff00', letterSpacing: '0.15em' }}>
+              ● ANALYZING {activeBatch > 0 ? `· BATCH ${activeBatch}/3` : ''}
+            </span>
           ) : done ? (
             <span style={{ fontFamily: 'monospace', fontSize: '10px', color: '#c8ff00', letterSpacing: '0.15em' }}>● COMPLETE</span>
           ) : (
@@ -404,7 +431,7 @@ Key: ${metadata.common.key || 'unknown'}
           <SectionBlock
             key={section.id}
             section={section}
-            content={parsedSections[section.id]}
+            content={sectionContents[section.id]}
             isActive={loading && activeSection === section.id}
             visible={visibleSections.includes(section.id)}
           />
@@ -432,8 +459,12 @@ Key: ${metadata.common.key || 'unknown'}
         )}
 
         {done && (
-          <button onClick={reset}
-            style={{ marginTop: '16px', border: '1px solid #1a1a1a', background: 'none', color: '#555', padding: '12px 32px', borderRadius: '100px', cursor: 'pointer', fontSize: '11px', fontFamily: 'monospace', letterSpacing: '0.15em', textTransform: 'uppercase', display: 'block', margin: '16px auto 0' }}>
+          <button onClick={reset} style={{
+            marginTop: '16px', border: '1px solid #1a1a1a', background: 'none', color: '#555',
+            padding: '12px 32px', borderRadius: '100px', cursor: 'pointer', fontSize: '11px',
+            fontFamily: 'monospace', letterSpacing: '0.15em', textTransform: 'uppercase',
+            display: 'block', margin: '16px auto 0',
+          }}>
             Analyze Another Track
           </button>
         )}
