@@ -48,6 +48,203 @@ const BATCHES: Record<number, number[]> = {
   4: [12],
 }
 
+async function extractAudioFeatures(file: File): Promise<string> {
+  const arrayBuffer = await file.arrayBuffer()
+  const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
+  const audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
+
+  const numChannels = audioBuffer.numberOfChannels
+  const sampleRate = audioBuffer.sampleRate
+  const duration = audioBuffer.duration
+  const totalSamples = audioBuffer.length
+
+  // Get channel data
+  const leftChannel = audioBuffer.getChannelData(0)
+  const rightChannel = numChannels > 1 ? audioBuffer.getChannelData(1) : null
+
+  // RMS loudness
+  let sumSquaresL = 0
+  let sumSquaresR = 0
+  for (let i = 0; i < totalSamples; i++) {
+    sumSquaresL += leftChannel[i] * leftChannel[i]
+    if (rightChannel) sumSquaresR += rightChannel[i] * rightChannel[i]
+  }
+  const rmsL = Math.sqrt(sumSquaresL / totalSamples)
+  const rmsR = rightChannel ? Math.sqrt(sumSquaresR / totalSamples) : rmsL
+  const rmsAvg = (rmsL + rmsR) / 2
+  const rmsDb = 20 * Math.log10(rmsAvg || 0.000001)
+
+  // Peak amplitude
+  let peakL = 0
+  let peakR = 0
+  for (let i = 0; i < totalSamples; i++) {
+    const absL = Math.abs(leftChannel[i])
+    if (absL > peakL) peakL = absL
+    if (rightChannel) {
+      const absR = Math.abs(rightChannel[i])
+      if (absR > peakR) peakR = absR
+    }
+  }
+  const peakAvg = rightChannel ? (peakL + peakR) / 2 : peakL
+  const peakDb = 20 * Math.log10(peakAvg || 0.000001)
+
+  // Crest factor (dynamic range indicator)
+  const crestFactor = peakDb - rmsDb
+
+  // Clipping estimate (samples at or above 0.99)
+  let clippedSamples = 0
+  for (let i = 0; i < totalSamples; i++) {
+    if (Math.abs(leftChannel[i]) >= 0.99) clippedSamples++
+    if (rightChannel && Math.abs(rightChannel[i]) >= 0.99) clippedSamples++
+  }
+  const clippingPercent = ((clippedSamples / (totalSamples * (rightChannel ? 2 : 1))) * 100).toFixed(3)
+
+  // DC offset
+  let sumL = 0
+  for (let i = 0; i < totalSamples; i++) sumL += leftChannel[i]
+  const dcOffset = Math.abs(sumL / totalSamples)
+
+  // Stereo correlation
+  let correlation = 0
+  if (rightChannel) {
+    let dotProduct = 0
+    let magL = 0
+    let magR = 0
+    // Sample every 4th sample for performance
+    for (let i = 0; i < totalSamples; i += 4) {
+      dotProduct += leftChannel[i] * rightChannel[i]
+      magL += leftChannel[i] * leftChannel[i]
+      magR += rightChannel[i] * rightChannel[i]
+    }
+    correlation = dotProduct / (Math.sqrt(magL) * Math.sqrt(magR) || 1)
+  } else {
+    correlation = 1
+  }
+
+  // Frequency band energy via FFT (using OfflineAudioContext + AnalyserNode)
+  const fftSize = 8192
+  const offlineCtx = new OfflineAudioContext(1, fftSize, sampleRate)
+  const source = offlineCtx.createBufferSource()
+
+  // Create mono mix for FFT
+  const monoBuffer = offlineCtx.createBuffer(1, fftSize, sampleRate)
+  const monoData = monoBuffer.getChannelData(0)
+  const midPoint = Math.floor(totalSamples / 2)
+  const start = Math.max(0, midPoint - fftSize / 2)
+  for (let i = 0; i < fftSize && (start + i) < totalSamples; i++) {
+    monoData[i] = leftChannel[start + i]
+    if (rightChannel) monoData[i] = (monoData[i] + rightChannel[start + i]) / 2
+  }
+
+  source.buffer = monoBuffer
+  source.connect(offlineCtx.destination)
+  source.start()
+  await offlineCtx.startRendering()
+
+  // Manual frequency band energy from FFT approximation
+  // Use Web Audio AnalyserNode on a regular context for a snapshot
+  const snapCtx = new OfflineAudioContext(1, fftSize * 2, sampleRate)
+  const analyserBuffer = snapCtx.createBuffer(1, fftSize * 2, sampleRate)
+  const analyserData = analyserBuffer.getChannelData(0)
+  const snapStart = Math.floor(totalSamples * 0.4)
+  for (let i = 0; i < fftSize * 2 && (snapStart + i) < totalSamples; i++) {
+    analyserData[i] = leftChannel[snapStart + i]
+    if (rightChannel) analyserData[i] = (analyserData[i] + rightChannel[snapStart + i]) / 2
+  }
+
+  // Compute band energies manually using frequency domain approximation
+  // Simple approach: measure RMS in time-domain with bandpass filters
+  const bands = {
+    sub: { low: 0, high: 80, energy: 0 },
+    lowMid: { low: 80, high: 300, energy: 0 },
+    mid: { low: 300, high: 2000, energy: 0 },
+    high: { low: 2000, high: 8000, energy: 0 },
+    air: { low: 8000, high: sampleRate / 2, energy: 0 },
+  }
+
+  // Use multiple offline contexts with biquad filters for each band
+  const bandResults: Record<string, number> = {}
+  for (const [bandName, band] of Object.entries(bands)) {
+    if (band.high > sampleRate / 2) {
+      bandResults[bandName] = 0
+      continue
+    }
+    try {
+      const bandCtx = new OfflineAudioContext(1, Math.min(totalSamples, sampleRate * 5), sampleRate)
+      const bandSource = bandCtx.createBufferSource()
+      const sampleCount = Math.min(totalSamples, sampleRate * 5)
+      const bandBuffer = bandCtx.createBuffer(1, sampleCount, sampleRate)
+      const bandData = bandBuffer.getChannelData(0)
+      const bandStart = Math.floor(totalSamples * 0.2)
+      for (let i = 0; i < sampleCount; i++) {
+        bandData[i] = leftChannel[bandStart + i] || 0
+        if (rightChannel) bandData[i] = (bandData[i] + (rightChannel[bandStart + i] || 0)) / 2
+      }
+      bandSource.buffer = bandBuffer
+
+      const filter = bandCtx.createBiquadFilter()
+      if (band.low === 0) {
+        filter.type = 'lowpass'
+        filter.frequency.value = band.high
+      } else if (band.high >= sampleRate / 2) {
+        filter.type = 'highpass'
+        filter.frequency.value = band.low
+      } else {
+        filter.type = 'bandpass'
+        filter.frequency.value = (band.low + band.high) / 2
+        filter.Q.value = (band.low + band.high) / (2 * (band.high - band.low))
+      }
+
+      bandSource.connect(filter)
+      filter.connect(bandCtx.destination)
+      bandSource.start()
+      const rendered = await bandCtx.startRendering()
+      const renderedData = rendered.getChannelData(0)
+      let sumSq = 0
+      for (let i = 0; i < renderedData.length; i++) sumSq += renderedData[i] * renderedData[i]
+      bandResults[bandName] = Math.sqrt(sumSq / renderedData.length)
+    } catch {
+      bandResults[bandName] = 0
+    }
+  }
+
+  const totalBandEnergy = Object.values(bandResults).reduce((a, b) => a + b, 0) || 1
+  const bandPercents: Record<string, string> = {}
+  for (const [k, v] of Object.entries(bandResults)) {
+    bandPercents[k] = ((v / totalBandEnergy) * 100).toFixed(1)
+  }
+
+  await audioContext.close()
+
+  // Stereo width descriptor
+  let stereoDesc = 'mono'
+  if (rightChannel) {
+    if (correlation > 0.95) stereoDesc = 'very narrow / near-mono'
+    else if (correlation > 0.7) stereoDesc = 'narrow'
+    else if (correlation > 0.4) stereoDesc = 'moderate width'
+    else if (correlation > 0.1) stereoDesc = 'wide'
+    else stereoDesc = 'very wide / possible phase issues'
+  }
+
+  return `
+--- AUDIO SIGNAL ANALYSIS ---
+RMS Loudness: ${rmsDb.toFixed(1)} dBFS
+Peak Amplitude: ${peakDb.toFixed(1)} dBFS
+Crest Factor (Dynamic Range): ${crestFactor.toFixed(1)} dB
+Estimated Clipping: ${clippingPercent}% of samples at/near 0dBFS
+DC Offset: ${dcOffset.toFixed(5)} ${dcOffset > 0.01 ? '(FLAGGED — above threshold)' : '(clean)'}
+Stereo Correlation: ${correlation.toFixed(3)} — ${stereoDesc}
+Channels: ${numChannels === 1 ? 'Mono' : 'Stereo'}
+
+Frequency Band Energy (relative):
+  Sub bass (0–80 Hz):      ${bandPercents.sub}%
+  Low-mid (80–300 Hz):     ${bandPercents.lowMid}%
+  Mids (300 Hz–2 kHz):     ${bandPercents.mid}%
+  High (2–8 kHz):          ${bandPercents.high}%
+  Air (8 kHz+):            ${bandPercents.air}%
+---`
+}
+
 function parseReport(text: string, sectionIds: number[]) {
   const sections: Record<number, string> = {}
   sectionIds.forEach((id, i) => {
@@ -192,6 +389,7 @@ export default function Home() {
   const [dragging, setDragging] = useState(false)
   const [question, setQuestion] = useState('')
   const [loading, setLoading] = useState(false)
+  const [loadingStage, setLoadingStage] = useState('')
   const [filename, setFilename] = useState('')
   const [done, setDone] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -263,7 +461,12 @@ export default function Home() {
 
     try {
       const { parseBlob } = await import('music-metadata-browser')
+
+      setLoadingStage('Reading metadata...')
       const metadata = await parseBlob(file)
+
+      setLoadingStage('Analyzing audio signal...')
+      const audioFeatures = await extractAudioFeatures(file)
 
       const audioInfo = `
 Filename: ${file.name}
@@ -277,8 +480,10 @@ Artist: ${metadata.common.artist || 'unknown'}
 Genre: ${metadata.common.genre?.[0] || 'unknown'}
 BPM: ${metadata.common.bpm || 'unknown'}
 Key: ${metadata.common.key || 'unknown'}
+${audioFeatures}
       `.trim()
 
+      setLoadingStage('')
       const q = question || 'Give me a full analysis'
 
       await runBatch(1, audioInfo, q)
@@ -294,6 +499,7 @@ Key: ${metadata.common.key || 'unknown'}
     }
 
     setLoading(false)
+    setLoadingStage('')
   }
 
   const sendReport = async () => {
@@ -321,6 +527,7 @@ Key: ${metadata.common.key || 'unknown'}
     setSectionContents({})
     setActiveSection(0)
     setLoading(false)
+    setLoadingStage('')
     rawReportRef.current = ''
   }
 
@@ -395,6 +602,12 @@ Key: ${metadata.common.key || 'unknown'}
           </>
         )}
 
+        {loading && loadingStage && (
+          <p style={{ marginTop: '24px', fontFamily: 'monospace', fontSize: '11px', color: '#c8ff00', letterSpacing: '0.15em' }}>
+            {loadingStage}
+          </p>
+        )}
+
         {error && (
           <div style={{ marginTop: '20px', width: '100%', maxWidth: '440px', background: '#1a0000', border: '1px solid #440000', borderRadius: '12px', padding: '16px' }}>
             <p style={{ color: '#ff6666', fontSize: '13px' }}>{error}</p>
@@ -421,7 +634,9 @@ Key: ${metadata.common.key || 'unknown'}
         </div>
         <div>
           {loading ? (
-            <span style={{ fontFamily: 'monospace', fontSize: '10px', color: '#c8ff00', letterSpacing: '0.15em' }}>● ANALYZING</span>
+            <span style={{ fontFamily: 'monospace', fontSize: '10px', color: '#c8ff00', letterSpacing: '0.15em' }}>
+              {loadingStage ? `● ${loadingStage.toUpperCase().replace('...', '')}` : '● ANALYZING'}
+            </span>
           ) : done ? (
             <span style={{ fontFamily: 'monospace', fontSize: '10px', color: '#c8ff00', letterSpacing: '0.15em' }}>● COMPLETE</span>
           ) : (
