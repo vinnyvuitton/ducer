@@ -62,7 +62,7 @@ Define: primary lane (be specific), secondary lane, playlist ecosystem, audience
 AUDIO DATA:
 {audioInfo}
 
-Produce sections 9–12 of the Ducer Intelligence Report. Use exactly these headers:
+Produce sections 9–11 of the Ducer Intelligence Report. Use exactly these headers:
 
 ## 9. MARKET & RELEASE POSITIONING
 Assess hook accessibility, radio viability, playlist compatibility, sync potential, viral potential, and comparable artists. Use scenario logic, not binary hit/miss language.
@@ -74,13 +74,26 @@ Model three scenarios with probability percentages:
 - Viral/breakout scenario + probability + what must happen + what could prevent it
 
 ## 11. RISK FACTORS
-List specific risks as a direct bulleted list. No softening. Be blunt.
+List specific risks as a direct bulleted list. No softening. Be blunt.`,
+
+  4: `You are Ducer — a music intelligence engine. No generic praise. Every claim specific and explained. Label strategy memo only.
+
+AUDIO DATA:
+{audioInfo}
+
+Produce section 12 of the Ducer Intelligence Report. Use exactly this header:
 
 ## 12. THE VERDICT
-- Score: File X/10, Sound X/10, Craft X/10, Market X/10
+Scores (each out of 10, be honest and critical):
+- File: X/10
+- Sound: X/10
+- Craft: X/10
+- Market: X/10
 - Overall Ducer Score: X/10
-- Written verdict: 3–5 sentences on where this record stands, what its ceiling is, and what the single most important thing to address is
-- ACT NOW: one direct actionable recommendation`
+
+Written verdict: 3–5 sentences on where this record stands, what its ceiling is, and what the single most important thing to address is. Be direct. No softening.
+
+ACT NOW: One specific, actionable recommendation the artist can action immediately.`
 }
 
 export async function POST(request) {
@@ -98,7 +111,7 @@ export async function POST(request) {
 
     const stream = await client.messages.stream({
       model: 'claude-sonnet-4-5',
-      max_tokens: 1500,
+      max_tokens: 2000,
       messages: [{ role: 'user', content: prompt }]
     })
 

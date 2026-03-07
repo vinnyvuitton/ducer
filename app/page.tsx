@@ -44,7 +44,8 @@ const SECTIONS = [
 const BATCHES: Record<number, number[]> = {
   1: [1, 2, 3, 4],
   2: [5, 6, 7, 8],
-  3: [9, 10, 11, 12],
+  3: [9, 10, 11],
+  4: [12],
 }
 
 function parseReport(text: string, sectionIds: number[]) {
@@ -200,7 +201,6 @@ export default function Home() {
   const [submitting, setSubmitting] = useState(false)
   const [visibleSections, setVisibleSections] = useState<number[]>([])
   const [sectionContents, setSectionContents] = useState<Record<number, string>>({})
-  const [activeBatch, setActiveBatch] = useState<number>(0)
   const [activeSection, setActiveSection] = useState<number>(0)
   const rawReportRef = useRef('')
 
@@ -211,9 +211,9 @@ export default function Home() {
     }
   }
 
-  const runBatch = async (batch: number, audioInfo: string, question: string) => {
-    setActiveBatch(batch)
+  const runBatch = async (batch: number, audioInfo: string, q: string) => {
     const batchSections = BATCHES[batch]
+
     setVisibleSections(prev => {
       const updated = [...prev]
       batchSections.forEach(id => { if (!updated.includes(id)) updated.push(id) })
@@ -223,7 +223,7 @@ export default function Home() {
     const res = await fetch('/api/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ audioInfo, question, batch })
+      body: JSON.stringify({ audioInfo, question: q, batch })
     })
 
     if (!res.ok) throw new Error(`Server error: ${res.status}`)
@@ -247,7 +247,6 @@ export default function Home() {
       setSectionContents(prev => ({ ...prev, ...parsed }))
     }
 
-    // Final parse to ensure all sections captured
     const finalParsed = parseReport(batchText, batchSections)
     setSectionContents(prev => ({ ...prev, ...finalParsed }))
   }
@@ -259,7 +258,6 @@ export default function Home() {
     setDone(false)
     setVisibleSections([])
     setSectionContents({})
-    setActiveBatch(0)
     setActiveSection(0)
     rawReportRef.current = ''
 
@@ -286,9 +284,9 @@ Key: ${metadata.common.key || 'unknown'}
       await runBatch(1, audioInfo, q)
       await runBatch(2, audioInfo, q)
       await runBatch(3, audioInfo, q)
+      await runBatch(4, audioInfo, q)
 
       setVisibleSections(SECTIONS.map(s => s.id))
-      setActiveBatch(0)
       setActiveSection(0)
       setDone(true)
     } catch (err: any) {
@@ -321,7 +319,6 @@ Key: ${metadata.common.key || 'unknown'}
     setSubmitted(false)
     setVisibleSections([])
     setSectionContents({})
-    setActiveBatch(0)
     setActiveSection(0)
     setLoading(false)
     rawReportRef.current = ''
@@ -360,7 +357,13 @@ Key: ${metadata.common.key || 'unknown'}
               <p style={{ color: '#333', fontSize: '11px', marginTop: '4px' }}>or click to browse</p>
             </>
           )}
-          <input id="fileInput" type="file" accept=".mp3,.wav,.aiff,.aif,.flac,.m4a,.ogg,.wma,.aac" style={{ display: 'none' }} onChange={(e) => handleFile(e.target.files?.[0])} />
+          <input
+            id="fileInput"
+            type="file"
+            accept=".mp3,.wav,.aiff,.aif,.flac,.m4a,.ogg,.wma,.aac"
+            style={{ display: 'none' }}
+            onChange={(e) => handleFile(e.target.files?.[0])}
+          />
         </div>
 
         {file && (
@@ -379,11 +382,14 @@ Key: ${metadata.common.key || 'unknown'}
                 fontFamily: 'sans-serif',
               }}
             />
-            <button onClick={analyze} style={{
-              marginTop: '12px', background: '#e8e8e8', color: '#080808',
-              fontWeight: 700, padding: '14px 48px', borderRadius: '100px',
-              border: 'none', cursor: 'pointer', fontSize: '13px', letterSpacing: '0.05em',
-            }}>
+            <button
+              onClick={analyze}
+              style={{
+                marginTop: '12px', background: '#e8e8e8', color: '#080808',
+                fontWeight: 700, padding: '14px 48px', borderRadius: '100px',
+                border: 'none', cursor: 'pointer', fontSize: '13px', letterSpacing: '0.05em',
+              }}
+            >
               Analyze
             </button>
           </>
@@ -415,9 +421,7 @@ Key: ${metadata.common.key || 'unknown'}
         </div>
         <div>
           {loading ? (
-            <span style={{ fontFamily: 'monospace', fontSize: '10px', color: '#c8ff00', letterSpacing: '0.15em' }}>
-              ● ANALYZING {activeBatch > 0 ? `· BATCH ${activeBatch}/3` : ''}
-            </span>
+            <span style={{ fontFamily: 'monospace', fontSize: '10px', color: '#c8ff00', letterSpacing: '0.15em' }}>● ANALYZING</span>
           ) : done ? (
             <span style={{ fontFamily: 'monospace', fontSize: '10px', color: '#c8ff00', letterSpacing: '0.15em' }}>● COMPLETE</span>
           ) : (
@@ -445,12 +449,25 @@ Key: ${metadata.common.key || 'unknown'}
               <>
                 <p style={{ fontWeight: 700, marginBottom: '4px', fontSize: '15px' }}>Want a copy of this report?</p>
                 <p style={{ color: '#555', fontSize: '13px', marginBottom: '20px' }}>Leave your name and email and we'll send it over.</p>
-                <input type="text" placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)}
-                  style={{ width: '100%', background: 'transparent', border: '1px solid #1a1a1a', borderRadius: '10px', padding: '12px 16px', color: '#e8e8e8', fontSize: '13px', outline: 'none', marginBottom: '10px', fontFamily: 'sans-serif' }} />
-                <input type="email" placeholder="Your email" value={email} onChange={(e) => setEmail(e.target.value)}
-                  style={{ width: '100%', background: 'transparent', border: '1px solid #1a1a1a', borderRadius: '10px', padding: '12px 16px', color: '#e8e8e8', fontSize: '13px', outline: 'none', marginBottom: '14px', fontFamily: 'sans-serif' }} />
-                <button onClick={sendReport} disabled={submitting || !name || !email}
-                  style={{ width: '100%', background: '#e8e8e8', color: '#080808', fontWeight: 700, padding: '14px', borderRadius: '100px', border: 'none', cursor: 'pointer', fontSize: '13px', opacity: (!name || !email) ? 0.4 : 1 }}>
+                <input
+                  type="text"
+                  placeholder="Your name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  style={{ width: '100%', background: 'transparent', border: '1px solid #1a1a1a', borderRadius: '10px', padding: '12px 16px', color: '#e8e8e8', fontSize: '13px', outline: 'none', marginBottom: '10px', fontFamily: 'sans-serif' }}
+                />
+                <input
+                  type="email"
+                  placeholder="Your email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  style={{ width: '100%', background: 'transparent', border: '1px solid #1a1a1a', borderRadius: '10px', padding: '12px 16px', color: '#e8e8e8', fontSize: '13px', outline: 'none', marginBottom: '14px', fontFamily: 'sans-serif' }}
+                />
+                <button
+                  onClick={sendReport}
+                  disabled={submitting || !name || !email}
+                  style={{ width: '100%', background: '#e8e8e8', color: '#080808', fontWeight: 700, padding: '14px', borderRadius: '100px', border: 'none', cursor: 'pointer', fontSize: '13px', opacity: (!name || !email) ? 0.4 : 1 }}
+                >
                   {submitting ? 'Sending...' : 'Send me this report'}
                 </button>
               </>
@@ -459,12 +476,15 @@ Key: ${metadata.common.key || 'unknown'}
         )}
 
         {done && (
-          <button onClick={reset} style={{
-            marginTop: '16px', border: '1px solid #1a1a1a', background: 'none', color: '#555',
-            padding: '12px 32px', borderRadius: '100px', cursor: 'pointer', fontSize: '11px',
-            fontFamily: 'monospace', letterSpacing: '0.15em', textTransform: 'uppercase',
-            display: 'block', margin: '16px auto 0',
-          }}>
+          <button
+            onClick={reset}
+            style={{
+              marginTop: '16px', border: '1px solid #1a1a1a', background: 'none', color: '#555',
+              padding: '12px 32px', borderRadius: '100px', cursor: 'pointer', fontSize: '11px',
+              fontFamily: 'monospace', letterSpacing: '0.15em', textTransform: 'uppercase',
+              display: 'block', margin: '16px auto 0',
+            }}
+          >
             Analyze Another Track
           </button>
         )}
