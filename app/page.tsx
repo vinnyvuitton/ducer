@@ -273,17 +273,21 @@ function LoadingBar({ word }: { word: string }) {
   )
 }
 
-function SectionBlock({ section, content, isActive, visible, loadingWord }: {
+function SectionBlock({ section, content, isActive, visible, loadingWord, isComplete }: {
   section: { id: number; label: string }
   content?: string
   isActive: boolean
   visible: boolean
   loadingWord: string
+  isComplete: boolean
 }) {
   const isVerdict = section.id === 12
 
+  // Only show content once the section is fully complete — never during streaming
+  const showContent = isComplete && !!content
+
   const scores = { file: 0, sound: 0, craft: 0, market: 0, overall: 0 }
-  if (isVerdict && content) {
+  if (isVerdict && showContent) {
     const fileMatch = content.match(/File[:\s]+(\d+)/i)
     const soundMatch = content.match(/Sound[:\s]+(\d+)/i)
     const craftMatch = content.match(/Craft[:\s]+(\d+)/i)
@@ -296,8 +300,8 @@ function SectionBlock({ section, content, isActive, visible, loadingWord }: {
     if (overallMatch) scores.overall = parseInt(overallMatch[1])
   }
 
-  const cleanContent = content
-    ? content.replace(/^##\s*\d+[.\s][^\n]*\n/, '').trim()
+  const cleanContent = showContent
+    ? content!.replace(/^##\s*\d+[.\s][^\n]*\n/, '').trim()
     : ''
 
   // Filter out standalone --- lines and clean em dashes
@@ -338,10 +342,11 @@ function SectionBlock({ section, content, isActive, visible, loadingWord }: {
         }} />
       </div>
 
-      {isActive && !content ? (
+      {/* Loading bar: show when active OR when visible but not yet complete */}
+      {(isActive || (visible && !isComplete)) && !showContent ? (
         <LoadingBar word={loadingWord} />
-      ) : isVerdict && content ? (
-        <div>
+      ) : isVerdict && showContent ? (
+        <div style={{ opacity: isComplete ? 1 : 0, transition: 'opacity 0.5s ease' }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '2px', padding: '20px', borderBottom: '1px solid rgba(200,255,0,0.1)' }}>
             {(['File', 'Sound', 'Craft', 'Market'] as const).map(label => (
               <div key={label} style={{ background: 'rgba(0,0,0,0.3)', padding: '14px', textAlign: 'center' }}>
@@ -369,8 +374,8 @@ function SectionBlock({ section, content, isActive, visible, loadingWord }: {
             })}
           </div>
         </div>
-      ) : content ? (
-        <div style={{ padding: '20px', color: '#aaa', fontSize: '13px', lineHeight: 1.8 }}>
+      ) : showContent ? (
+        <div style={{ padding: '20px', color: '#aaa', fontSize: '13px', lineHeight: 1.8, opacity: isComplete ? 1 : 0, transition: 'opacity 0.5s ease' }}>
           {cleanLines.map((line, i) => {
             const cl = cleanLine(line)
             if (!cl) return null
@@ -409,6 +414,7 @@ export default function Home() {
   const [submitting, setSubmitting] = useState(false)
   const [visibleSections, setVisibleSections] = useState<number[]>([])
   const [sectionContents, setSectionContents] = useState<Record<number, string>>({})
+  const [completedSections, setCompletedSections] = useState<number[]>([])
   const [activeSection, setActiveSection] = useState<number>(0)
   const rawReportRef = useRef('')
 
@@ -431,32 +437,6 @@ export default function Home() {
     sectionWordMapRef.current[sectionId] = word
     return word
   }
-
-  // Scroll lock: prevent scrolling below the bottom of the active section block
-  const sectionRefs = useRef<Record<number, HTMLDivElement | null>>({})
-  const scrollLockRef = useRef(true)
-
-  useEffect(() => {
-    if (!loading) {
-      scrollLockRef.current = false
-      return
-    }
-    scrollLockRef.current = true
-
-    const handleScroll = () => {
-      if (!scrollLockRef.current || !activeSection) return
-      const el = sectionRefs.current[activeSection]
-      if (!el) return
-      const rect = el.getBoundingClientRect()
-      const maxScrollY = window.scrollY + rect.bottom - window.innerHeight + 20
-      if (window.scrollY > maxScrollY) {
-        window.scrollTo({ top: maxScrollY })
-      }
-    }
-
-    window.addEventListener('scroll', handleScroll, { passive: false })
-    return () => window.removeEventListener('scroll', handleScroll)
-  }, [loading, activeSection])
 
   const handleFile = (f: File | null | undefined) => {
     if (f && f.type.startsWith('audio/')) {
@@ -493,15 +473,15 @@ export default function Home() {
       batchText += chunk
       rawReportRef.current += chunk
 
+      // Only update active section indicator during streaming — NOT content
       const active = getActiveSectionInBatch(batchText, batchSections)
       setActiveSection(active)
-
-      const parsed = parseReport(batchText, batchSections)
-      setSectionContents(prev => ({ ...prev, ...parsed }))
     }
 
+    // Batch fully done — now parse and reveal all at once
     const finalParsed = parseReport(batchText, batchSections)
     setSectionContents(prev => ({ ...prev, ...finalParsed }))
+    setCompletedSections(prev => [...prev, ...batchSections])
   }
 
   const analyze = async () => {
@@ -511,10 +491,10 @@ export default function Home() {
     setDone(false)
     setVisibleSections([])
     setSectionContents({})
+    setCompletedSections([])
     setActiveSection(0)
     rawReportRef.current = ''
     initWordQueue()
-    scrollLockRef.current = true
 
     try {
       const { parseBlob } = await import('music-metadata-browser')
@@ -571,7 +551,6 @@ ${audioFeatures}
 
     setLoading(false)
     setLoadingStage('')
-    scrollLockRef.current = false
   }
 
   const sendReport = async () => {
@@ -611,17 +590,17 @@ ${audioFeatures}
     setSubmitted(false)
     setVisibleSections([])
     setSectionContents({})
+    setCompletedSections([])
     setActiveSection(0)
     setLoading(false)
     setLoadingStage('')
     rawReportRef.current = ''
-    scrollLockRef.current = false
   }
 
   if (!loading && Object.keys(sectionContents).length === 0 && !done) {
     return (
       <main style={{ minHeight: '100vh', background: '#080808', color: '#e8e8e8', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '16px', fontFamily: 'sans-serif' }}>
-        <p style={{ fontFamily: 'monospace', fontSize: '10px', letterSpacing: '0.3em', color: '#555', textTransform: 'uppercase', marginBottom: '16px' }}>Music Analysis</p>
+        <p style={{ fontFamily: 'monospace', fontSize: '10px', letterSpacing: '0.3em', color: '#555', textTransform: 'uppercase', marginBottom: '16px' }}>Music Intelligence</p>
         <h1 style={{ fontSize: 'clamp(60px, 15vw, 100px)', fontWeight: 900, letterSpacing: '-2px', lineHeight: 1, marginBottom: '12px' }}>DUCER</h1>
         <p style={{ color: '#555', marginBottom: '48px', fontSize: '15px' }}>{randomTagline}</p>
 
@@ -734,18 +713,15 @@ ${audioFeatures}
 
       <div style={{ maxWidth: '960px', margin: '0 auto', padding: '40px' }}>
         {SECTIONS.map(section => (
-          <div
+          <SectionBlock
             key={section.id}
-            ref={el => { sectionRefs.current[section.id] = el }}
-          >
-            <SectionBlock
-              section={section}
-              content={sectionContents[section.id]}
-              isActive={loading && activeSection === section.id}
-              visible={visibleSections.includes(section.id)}
-              loadingWord={getWordForSection(section.id)}
-            />
-          </div>
+            section={section}
+            content={sectionContents[section.id]}
+            isActive={loading && activeSection === section.id}
+            visible={visibleSections.includes(section.id)}
+            loadingWord={getWordForSection(section.id)}
+            isComplete={completedSections.includes(section.id)}
+          />
         ))}
 
         {done && (

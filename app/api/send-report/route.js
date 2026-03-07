@@ -153,36 +153,40 @@ function buildEmailHtml({ name, filename, sections, year }) {
 
   return `
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" style="background-color:#080808;">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Ducer Report</title>
   <style>
-    body, table, td, div, p, span { color-scheme: dark; }
-    @media (prefers-color-scheme: dark) {
-      body { background-color: #080808 !important; }
-    }
+    body { background-color: #080808 !important; margin: 0 !important; padding: 0 !important; }
+    .outer { background-color: #080808 !important; }
+    .inner { background-color: #080808 !important; }
+    .sec-header-verdict { background-color: #0a0d00 !important; }
+    .sec-header { background-color: #0c0c0c !important; }
+    .sec-body-verdict { background-color: #0d1100 !important; }
+    .sec-body { background-color: #0f0f0f !important; }
+    div, td, p, span, h1, table { color-scheme: dark only; }
   </style>
 </head>
-<body style="margin:0;padding:0;background-color:#080808;font-family:Arial,Helvetica,sans-serif;color:#e8e8e8;">
-  <table width="100%" cellpadding="0" cellspacing="0" bgcolor="#080808" style="background-color:#080808;padding:40px 20px;">
+<body class="outer" style="margin:0;padding:0;background-color:#080808 !important;font-family:Arial,Helvetica,sans-serif;color:#e8e8e8;">
+  <table class="outer" width="100%" cellpadding="0" cellspacing="0" bgcolor="#080808" style="background-color:#080808 !important;padding:40px 20px;">
     <tr>
-      <td align="center" bgcolor="#080808" style="background-color:#080808;">
-        <table width="100%" style="max-width:680px;background-color:#080808;" cellpadding="0" cellspacing="0" bgcolor="#080808">
+      <td align="center" bgcolor="#080808" class="outer" style="background-color:#080808 !important;">
+        <table class="inner" width="100%" style="max-width:680px;background-color:#080808 !important;" cellpadding="0" cellspacing="0" bgcolor="#080808">
 
           <!-- Header -->
           <tr>
-            <td bgcolor="#080808" style="background-color:#080808;padding-bottom:32px;border-bottom:1px solid #1a1a1a;">
+            <td bgcolor="#080808" class="inner" style="background-color:#080808 !important;padding-bottom:32px;border-bottom:2px solid #1a1a1a;">
               <p style="margin:0 0 4px;font-family:monospace;font-size:9px;letter-spacing:0.3em;color:#555555;text-transform:uppercase;">Music Intelligence Report</p>
               <h1 style="margin:0;font-size:48px;font-weight:900;letter-spacing:-2px;color:#e8e8e8;line-height:1;">DUCER</h1>
-              ${filename ? `<p style="margin:6px 0 0;font-family:monospace;font-size:11px;color:#444444;">${escapeHtml(filename)}</p>` : ''}
+              ${filename ? `<p style="margin:6px 0 0;font-family:monospace;font-size:11px;color:#555555;">${escapeHtml(filename)}</p>` : ''}
             </td>
           </tr>
 
           <!-- Greeting -->
           <tr>
-            <td bgcolor="#080808" style="background-color:#080808;padding:28px 0 24px;">
+            <td bgcolor="#080808" class="inner" style="background-color:#080808 !important;padding:28px 0 24px;">
               <p style="margin:0 0 10px;font-size:14px;color:#aaaaaa;line-height:1.6;">Hey ${escapeHtml(name)},</p>
               <p style="margin:0;font-size:14px;color:#aaaaaa;line-height:1.6;">Your full Ducer intelligence report is below${filename ? ` for <strong style="color:#e8e8e8;">${escapeHtml(filename)}</strong>` : ''}. This is your track. No filter.</p>
             </td>
@@ -190,16 +194,16 @@ function buildEmailHtml({ name, filename, sections, year }) {
 
           <!-- Report Sections -->
           <tr>
-            <td bgcolor="#080808" style="background-color:#080808;">
+            <td bgcolor="#080808" class="inner" style="background-color:#080808 !important;">
               ${sectionHtml}
             </td>
           </tr>
 
           <!-- Footer -->
           <tr>
-            <td bgcolor="#080808" style="background-color:#080808;padding-top:40px;border-top:1px solid #1a1a1a;text-align:center;">
+            <td bgcolor="#080808" class="inner" style="background-color:#080808 !important;padding-top:40px;border-top:1px solid #222222;text-align:center;">
               <p style="margin:0 0 4px;font-family:monospace;font-size:16px;font-weight:900;letter-spacing:-0.5px;color:#e8e8e8;">DUCER</p>
-              <p style="margin:0;font-family:monospace;font-size:9px;letter-spacing:0.2em;color:#333333;text-transform:uppercase;">Music Intelligence &copy; ${year}</p>
+              <p style="margin:0;font-family:monospace;font-size:9px;letter-spacing:0.2em;color:#444444;text-transform:uppercase;">Music Intelligence &copy; ${year}</p>
             </td>
           </tr>
 
