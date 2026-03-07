@@ -135,16 +135,20 @@ function buildEmailHtml({ name, filename, sections, year }) {
     ` : ''
 
     return `
-    <div style="margin-bottom:2px;border:1px solid ${isVerdict ? '#c8ff00' : '#1f1f1f'};background:${isVerdict ? '#0d1100' : '#0f0f0f'};">
-      <div style="padding:12px 18px;border-bottom:1px solid ${isVerdict ? 'rgba(200,255,0,0.2)' : '#1a1a1a'};background:${isVerdict ? 'rgba(200,255,0,0.04)' : '#0c0c0c'};">
-        <span style="font-family:monospace;font-size:9px;color:#333;letter-spacing:0.15em;margin-right:14px;">${String(id).padStart(2, '0')}</span>
-        <span style="font-family:monospace;font-size:10px;letter-spacing:0.2em;color:${isVerdict ? '#c8ff00' : '#555'};text-transform:uppercase;">${escapeHtml(label)}</span>
-      </div>
-      <div style="padding:18px;">
-        ${scoresHtml}
-        ${paragraphs}
-      </div>
-    </div>`
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:2px;border:1px solid ${isVerdict ? '#c8ff00' : '#1f1f1f'};background-color:${isVerdict ? '#0d1100' : '#0f0f0f'};" bgcolor="${isVerdict ? '#0d1100' : '#0f0f0f'}">
+      <tr>
+        <td bgcolor="${isVerdict ? '#0a0d00' : '#0c0c0c'}" style="background-color:${isVerdict ? '#0a0d00' : '#0c0c0c'};padding:12px 18px;border-bottom:1px solid ${isVerdict ? 'rgba(200,255,0,0.2)' : '#1a1a1a'};">
+          <span style="font-family:monospace;font-size:9px;color:#333333;letter-spacing:0.15em;margin-right:14px;">${String(id).padStart(2, '0')}</span>
+          <span style="font-family:monospace;font-size:10px;letter-spacing:0.2em;color:${isVerdict ? '#c8ff00' : '#555555'};text-transform:uppercase;">${escapeHtml(label)}</span>
+        </td>
+      </tr>
+      <tr>
+        <td bgcolor="${isVerdict ? '#0d1100' : '#0f0f0f'}" style="background-color:${isVerdict ? '#0d1100' : '#0f0f0f'};padding:18px;">
+          ${scoresHtml}
+          ${paragraphs}
+        </td>
+      </tr>
+    </table>`
   }).join('')
 
   return `
@@ -154,25 +158,31 @@ function buildEmailHtml({ name, filename, sections, year }) {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Ducer Report</title>
+  <style>
+    body, table, td, div, p, span { color-scheme: dark; }
+    @media (prefers-color-scheme: dark) {
+      body { background-color: #080808 !important; }
+    }
+  </style>
 </head>
-<body style="margin:0;padding:0;background:#080808;font-family:Arial,Helvetica,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#080808;padding:40px 20px;">
+<body style="margin:0;padding:0;background-color:#080808;font-family:Arial,Helvetica,sans-serif;color:#e8e8e8;">
+  <table width="100%" cellpadding="0" cellspacing="0" bgcolor="#080808" style="background-color:#080808;padding:40px 20px;">
     <tr>
-      <td align="center">
-        <table width="100%" style="max-width:680px;" cellpadding="0" cellspacing="0">
+      <td align="center" bgcolor="#080808" style="background-color:#080808;">
+        <table width="100%" style="max-width:680px;background-color:#080808;" cellpadding="0" cellspacing="0" bgcolor="#080808">
 
           <!-- Header -->
           <tr>
-            <td style="padding-bottom:32px;border-bottom:1px solid #1a1a1a;">
-              <p style="margin:0 0 4px;font-family:monospace;font-size:9px;letter-spacing:0.3em;color:#555;text-transform:uppercase;">Music Intelligence Report</p>
+            <td bgcolor="#080808" style="background-color:#080808;padding-bottom:32px;border-bottom:1px solid #1a1a1a;">
+              <p style="margin:0 0 4px;font-family:monospace;font-size:9px;letter-spacing:0.3em;color:#555555;text-transform:uppercase;">Music Intelligence Report</p>
               <h1 style="margin:0;font-size:48px;font-weight:900;letter-spacing:-2px;color:#e8e8e8;line-height:1;">DUCER</h1>
-              ${filename ? `<p style="margin:6px 0 0;font-family:monospace;font-size:11px;color:#444;">${escapeHtml(filename)}</p>` : ''}
+              ${filename ? `<p style="margin:6px 0 0;font-family:monospace;font-size:11px;color:#444444;">${escapeHtml(filename)}</p>` : ''}
             </td>
           </tr>
 
           <!-- Greeting -->
           <tr>
-            <td style="padding:28px 0 24px;">
+            <td bgcolor="#080808" style="background-color:#080808;padding:28px 0 24px;">
               <p style="margin:0 0 10px;font-size:14px;color:#aaaaaa;line-height:1.6;">Hey ${escapeHtml(name)},</p>
               <p style="margin:0;font-size:14px;color:#aaaaaa;line-height:1.6;">Your full Ducer intelligence report is below${filename ? ` for <strong style="color:#e8e8e8;">${escapeHtml(filename)}</strong>` : ''}. This is your track. No filter.</p>
             </td>
@@ -180,16 +190,16 @@ function buildEmailHtml({ name, filename, sections, year }) {
 
           <!-- Report Sections -->
           <tr>
-            <td>
+            <td bgcolor="#080808" style="background-color:#080808;">
               ${sectionHtml}
             </td>
           </tr>
 
           <!-- Footer -->
           <tr>
-            <td style="padding-top:40px;border-top:1px solid #1a1a1a;text-align:center;">
+            <td bgcolor="#080808" style="background-color:#080808;padding-top:40px;border-top:1px solid #1a1a1a;text-align:center;">
               <p style="margin:0 0 4px;font-family:monospace;font-size:16px;font-weight:900;letter-spacing:-0.5px;color:#e8e8e8;">DUCER</p>
-              <p style="margin:0;font-family:monospace;font-size:9px;letter-spacing:0.2em;color:#333;text-transform:uppercase;">Music Intelligence &copy; ${year}</p>
+              <p style="margin:0;font-family:monospace;font-size:9px;letter-spacing:0.2em;color:#333333;text-transform:uppercase;">Music Intelligence &copy; ${year}</p>
             </td>
           </tr>
 
