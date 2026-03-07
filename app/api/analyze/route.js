@@ -6,8 +6,8 @@ export async function POST(request) {
   try {
     const { audioInfo, question } = await request.json()
 
-    const message = await client.messages.create({
-      model: 'claude-opus-4-5',
+    const stream = await client.messages.stream({
+      model: 'claude-sonnet-4-5',
       max_tokens: 4000,
       messages: [{
         role: 'user',
@@ -55,19 +55,18 @@ Evaluate the hook across five dimensions:
 3. Lyrical stickiness
 4. Dynamic lift
 5. Crowd participation viability
-Rate each dimension and explain why. Be specific about what is working and what is not.
+Rate each dimension as Low / Medium / Medium-High / High / Very High and explain why.
 
 ## 6. PRODUCTION & ARRANGEMENT INTELLIGENCE
 Assess the production based on available data. Cover:
 - What the instrumentation and genre suggest about arrangement choices
-- Density vs space — is the mix fighting itself or breathing?
+- Density vs space
 - Low end behavior
 - Stereo approach
 - What a producer would flag immediately
-Do not say "great production." Explain what is specifically working or not working and why it matters.
 
 ## 7. LYRICS INTELLIGENCE
-Analyze the lyric function. Answer:
+Analyze the lyric function. Answer all 8 questions:
 1. What is this lyric trying to do?
 2. How clearly does it do it?
 3. What line or phrase is carrying the song?
@@ -76,64 +75,64 @@ Analyze the lyric function. Answer:
 6. Would it work without the performer's delivery?
 7. What is the cliché risk?
 8. What would a top writer tighten?
-If lyrics are unavailable from metadata, state that clearly and assess based on genre conventions and what can be reasonably inferred.
+If lyrics are unavailable from metadata, state that clearly and assess based on genre conventions.
 
 ## 8. LANE CLASSIFICATION
 Define:
-- Primary lane (be specific — not just "hip hop" but "melodic trap" or "boom bap revival")
+- Primary lane (be specific)
 - Secondary lane
-- Playlist ecosystem this track belongs in
-- Audience archetype (who is this for, specifically?)
-Genre labels without lane context are insufficient.
+- Playlist ecosystem
+- Audience archetype
 
 ## 9. MARKET & RELEASE POSITIONING
-Separate artistic strength from commercial scalability. Assess:
-- Hook accessibility
-- Radio viability
-- Playlist compatibility
-- Sync potential
-- Viral potential
-- Comparable artists at a similar stage
-- Where does this track sit relative to what is charting right now in its lane?
-Avoid binary hit/not-hit language. Use scenario logic.
+Assess hook accessibility, radio viability, playlist compatibility, sync potential, viral potential, and comparable artists. Use scenario logic, not binary hit/miss language.
 
 ## 10. TRAJECTORY SCENARIOS
-Model three scenarios with honest probability framing:
-- **Organic growth scenario** — what happens if this is released with no promotion
-- **Editorial/playlist placement scenario** — what happens with the right placement
-- **Viral/breakout scenario** — what would need to be true for this to break out
-Each scenario must include what would need to happen and what could prevent it. No deterministic forecasting.
+Model three scenarios:
+- Organic growth scenario + probability percentage
+- Editorial/playlist placement scenario + probability percentage
+- Viral/breakout scenario + probability percentage
+Each must include what would need to happen and what could prevent it.
 
 ## 11. RISK FACTORS
-Identify the specific risks clearly and directly. Consider:
-- Structural weaknesses
-- Hook durability gaps
-- Genre saturation
-- Production red flags
-- Market timing
-- Identity or distinguishability ceiling
-Do not soften risks. The artist needs to know.
+List specific risks clearly and directly as a bulleted list. No softening.
 
 ## 12. THE VERDICT
-Deliver the final assessment. Include:
-- A score for each category (File, Sound, Craft, Market) on a scale of 1-10
-- An overall Ducer score out of 10
-- A written verdict of 3-5 sentences that tells the artist exactly where this record stands, what its ceiling is, and what the single most important thing to address is
-End with one direct, actionable recommendation the artist can act on immediately.
+- Score: File X/10, Sound X/10, Craft X/10, Market X/10
+- Overall Ducer Score: X/10
+- Written verdict: 3-5 sentences on where this record stands, what its ceiling is, and what the single most important thing to address is
+- One direct actionable recommendation labeled ACT NOW:
 
 ---
 
-DOCTRINE REMINDERS:
-- Judge this song by its lane, not by pop radio standards
-- Differentiate polish from breakthrough identity — a well-made record is not always a memorable one
-- Differentiate niche dominance from broad scalability
-- Never hallucinate missing data — if confidence is low, say so
-- Explain why for every claim — Ducer should be educational and career-useful, not just descriptive
+DOCTRINE:
+- Judge by lane, not pop radio standards
+- Differentiate polish from breakthrough identity
+- Never hallucinate missing data
+- Explain why for every claim
 - No fan reviews. No empty praise. This is a label strategy memo.`
       }]
     })
 
-    return Response.json({ report: message.content[0].text })
+    const encoder = new TextEncoder()
+    const readable = new ReadableStream({
+      async start(controller) {
+        for await (const chunk of stream) {
+          if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
+            controller.enqueue(encoder.encode(chunk.delta.text))
+          }
+        }
+        controller.close()
+      }
+    })
+
+    return new Response(readable, {
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Transfer-Encoding': 'chunked',
+      }
+    })
+
   } catch (error) {
     console.error('Analysis error:', error)
     return Response.json({ error: error.message }, { status: 500 })
