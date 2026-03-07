@@ -55,14 +55,11 @@ async function extractAudioFeatures(file: File): Promise<string> {
 
   const numChannels = audioBuffer.numberOfChannels
   const sampleRate = audioBuffer.sampleRate
-  const duration = audioBuffer.duration
   const totalSamples = audioBuffer.length
 
-  // Get channel data
   const leftChannel = audioBuffer.getChannelData(0)
   const rightChannel = numChannels > 1 ? audioBuffer.getChannelData(1) : null
 
-  // RMS loudness
   let sumSquaresL = 0
   let sumSquaresR = 0
   for (let i = 0; i < totalSamples; i++) {
@@ -74,7 +71,6 @@ async function extractAudioFeatures(file: File): Promise<string> {
   const rmsAvg = (rmsL + rmsR) / 2
   const rmsDb = 20 * Math.log10(rmsAvg || 0.000001)
 
-  // Peak amplitude
   let peakL = 0
   let peakR = 0
   for (let i = 0; i < totalSamples; i++) {
@@ -87,11 +83,8 @@ async function extractAudioFeatures(file: File): Promise<string> {
   }
   const peakAvg = rightChannel ? (peakL + peakR) / 2 : peakL
   const peakDb = 20 * Math.log10(peakAvg || 0.000001)
-
-  // Crest factor (dynamic range indicator)
   const crestFactor = peakDb - rmsDb
 
-  // Clipping estimate (samples at or above 0.99)
   let clippedSamples = 0
   for (let i = 0; i < totalSamples; i++) {
     if (Math.abs(leftChannel[i]) >= 0.99) clippedSamples++
@@ -99,18 +92,15 @@ async function extractAudioFeatures(file: File): Promise<string> {
   }
   const clippingPercent = ((clippedSamples / (totalSamples * (rightChannel ? 2 : 1))) * 100).toFixed(3)
 
-  // DC offset
   let sumL = 0
   for (let i = 0; i < totalSamples; i++) sumL += leftChannel[i]
   const dcOffset = Math.abs(sumL / totalSamples)
 
-  // Stereo correlation
   let correlation = 0
   if (rightChannel) {
     let dotProduct = 0
     let magL = 0
     let magR = 0
-    // Sample every 4th sample for performance
     for (let i = 0; i < totalSamples; i += 4) {
       dotProduct += leftChannel[i] * rightChannel[i]
       magL += leftChannel[i] * leftChannel[i]
@@ -121,39 +111,6 @@ async function extractAudioFeatures(file: File): Promise<string> {
     correlation = 1
   }
 
-  // Frequency band energy via FFT (using OfflineAudioContext + AnalyserNode)
-  const fftSize = 8192
-  const offlineCtx = new OfflineAudioContext(1, fftSize, sampleRate)
-  const source = offlineCtx.createBufferSource()
-
-  // Create mono mix for FFT
-  const monoBuffer = offlineCtx.createBuffer(1, fftSize, sampleRate)
-  const monoData = monoBuffer.getChannelData(0)
-  const midPoint = Math.floor(totalSamples / 2)
-  const start = Math.max(0, midPoint - fftSize / 2)
-  for (let i = 0; i < fftSize && (start + i) < totalSamples; i++) {
-    monoData[i] = leftChannel[start + i]
-    if (rightChannel) monoData[i] = (monoData[i] + rightChannel[start + i]) / 2
-  }
-
-  source.buffer = monoBuffer
-  source.connect(offlineCtx.destination)
-  source.start()
-  await offlineCtx.startRendering()
-
-  // Manual frequency band energy from FFT approximation
-  // Use Web Audio AnalyserNode on a regular context for a snapshot
-  const snapCtx = new OfflineAudioContext(1, fftSize * 2, sampleRate)
-  const analyserBuffer = snapCtx.createBuffer(1, fftSize * 2, sampleRate)
-  const analyserData = analyserBuffer.getChannelData(0)
-  const snapStart = Math.floor(totalSamples * 0.4)
-  for (let i = 0; i < fftSize * 2 && (snapStart + i) < totalSamples; i++) {
-    analyserData[i] = leftChannel[snapStart + i]
-    if (rightChannel) analyserData[i] = (analyserData[i] + rightChannel[snapStart + i]) / 2
-  }
-
-  // Compute band energies manually using frequency domain approximation
-  // Simple approach: measure RMS in time-domain with bandpass filters
   const bands = {
     sub: { low: 0, high: 80, energy: 0 },
     lowMid: { low: 80, high: 300, energy: 0 },
@@ -162,13 +119,9 @@ async function extractAudioFeatures(file: File): Promise<string> {
     air: { low: 8000, high: sampleRate / 2, energy: 0 },
   }
 
-  // Use multiple offline contexts with biquad filters for each band
   const bandResults: Record<string, number> = {}
   for (const [bandName, band] of Object.entries(bands)) {
-    if (band.high > sampleRate / 2) {
-      bandResults[bandName] = 0
-      continue
-    }
+    if (band.high > sampleRate / 2) { bandResults[bandName] = 0; continue }
     try {
       const bandCtx = new OfflineAudioContext(1, Math.min(totalSamples, sampleRate * 5), sampleRate)
       const bandSource = bandCtx.createBufferSource()
@@ -181,20 +134,10 @@ async function extractAudioFeatures(file: File): Promise<string> {
         if (rightChannel) bandData[i] = (bandData[i] + (rightChannel[bandStart + i] || 0)) / 2
       }
       bandSource.buffer = bandBuffer
-
       const filter = bandCtx.createBiquadFilter()
-      if (band.low === 0) {
-        filter.type = 'lowpass'
-        filter.frequency.value = band.high
-      } else if (band.high >= sampleRate / 2) {
-        filter.type = 'highpass'
-        filter.frequency.value = band.low
-      } else {
-        filter.type = 'bandpass'
-        filter.frequency.value = (band.low + band.high) / 2
-        filter.Q.value = (band.low + band.high) / (2 * (band.high - band.low))
-      }
-
+      if (band.low === 0) { filter.type = 'lowpass'; filter.frequency.value = band.high }
+      else if (band.high >= sampleRate / 2) { filter.type = 'highpass'; filter.frequency.value = band.low }
+      else { filter.type = 'bandpass'; filter.frequency.value = (band.low + band.high) / 2; filter.Q.value = (band.low + band.high) / (2 * (band.high - band.low)) }
       bandSource.connect(filter)
       filter.connect(bandCtx.destination)
       bandSource.start()
@@ -203,9 +146,7 @@ async function extractAudioFeatures(file: File): Promise<string> {
       let sumSq = 0
       for (let i = 0; i < renderedData.length; i++) sumSq += renderedData[i] * renderedData[i]
       bandResults[bandName] = Math.sqrt(sumSq / renderedData.length)
-    } catch {
-      bandResults[bandName] = 0
-    }
+    } catch { bandResults[bandName] = 0 }
   }
 
   const totalBandEnergy = Object.values(bandResults).reduce((a, b) => a + b, 0) || 1
@@ -216,7 +157,6 @@ async function extractAudioFeatures(file: File): Promise<string> {
 
   await audioContext.close()
 
-  // Stereo width descriptor
   let stereoDesc = 'mono'
   if (rightChannel) {
     if (correlation > 0.95) stereoDesc = 'very narrow / near-mono'
@@ -411,7 +351,6 @@ export default function Home() {
 
   const runBatch = async (batch: number, audioInfo: string, q: string) => {
     const batchSections = BATCHES[batch]
-
     setVisibleSections(prev => {
       const updated = [...prev]
       batchSections.forEach(id => { if (!updated.includes(id)) updated.push(id) })
@@ -505,13 +444,27 @@ ${audioFeatures}
   const sendReport = async () => {
     if (!name || !email) return
     setSubmitting(true)
-    await fetch('/api/send-report', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, email, filename, report: rawReportRef.current })
-    })
-    setSubmitted(true)
-    setSubmitting(false)
+    setError(null)
+
+    try {
+      const res = await fetch('/api/send-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, filename, report: rawReportRef.current })
+      })
+
+      const data = await res.json()
+
+      if (!res.ok) {
+        throw new Error(data?.error || 'Failed to send report.')
+      }
+
+      setSubmitted(true)
+    } catch (err: any) {
+      setError(err.message || 'Failed to send report.')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   const reset = () => {
@@ -685,6 +638,12 @@ ${audioFeatures}
                 >
                   {submitting ? 'Sending...' : 'Send me this report'}
                 </button>
+
+                {error && (
+                  <div style={{ marginTop: '12px', background: '#1a0000', border: '1px solid #440000', borderRadius: '10px', padding: '12px 16px' }}>
+                    <p style={{ color: '#ff6666', fontSize: '12px' }}>{error}</p>
+                  </div>
+                )}
               </>
             )}
           </div>

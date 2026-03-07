@@ -1,62 +1,60 @@
-import Anthropic from '@anthropic-ai/sdk'
-import * as mm from 'music-metadata'
+import { Resend } from 'resend'
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+const resend = new Resend(process.env.RESEND_API_KEY)
 
 export async function POST(request) {
   try {
-    const formData = await request.formData()
-    const file = formData.get('audio')
-    const question = formData.get('question') || 'Give me a full analysis'
+    const { name, email, filename, report } = await request.json()
 
-    if (!file) return Response.json({ error: 'No file uploaded' }, { status: 400 })
+    if (!name || !email || !report) {
+      return Response.json(
+        { error: 'Missing required fields.' },
+        { status: 400 }
+      )
+    }
 
-    const bytes = await file.arrayBuffer()
-    const buffer = Buffer.from(bytes)
+    const subject = filename
+      ? `Your Ducer report for ${filename}`
+      : 'Your Ducer report'
 
-    const metadata = await mm.parseBuffer(buffer, file.type)
+    const html = `
+      <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #111;">
+        <p>Hey ${name},</p>
+        <p>Here's your Ducer report${filename ? ` for <strong>${filename}</strong>` : ''}.</p>
+        <hr style="margin: 24px 0;" />
+        <pre style="white-space: pre-wrap; font-family: Arial, sans-serif;">${escapeHtml(report)}</pre>
+      </div>
+    `
 
-    const audioInfo = `
-Filename: ${file.name}
-Format: ${metadata.format.container || 'unknown'}
-Duration: ${metadata.format.duration ? Math.round(metadata.format.duration) + ' seconds' : 'unknown'}
-Bitrate: ${metadata.format.bitrate ? Math.round(metadata.format.bitrate / 1000) + ' kbps' : 'unknown'}
-Sample Rate: ${metadata.format.sampleRate || 'unknown'} Hz
-Channels: ${metadata.format.numberOfChannels || 'unknown'}
-Title: ${metadata.common.title || 'unknown'}
-Artist: ${metadata.common.artist || 'unknown'}
-Genre: ${metadata.common.genre?.[0] || 'unknown'}
-BPM: ${metadata.common.bpm || 'unknown'}
-Key: ${metadata.common.key || 'unknown'}
-    `.trim()
-
-    const message = await client.messages.create({
-      model: 'claude-opus-4-5',
-      max_tokens: 4000,
-      messages: [{
-        role: 'user',
-        content: `You are Ducer, an expert music analysis AI. Based on the technical metadata below, provide a detailed analysis report.
-
-AUDIO DATA:
-${audioInfo}
-
-ARTIST'S GOAL: ${question}
-
-Provide a full Ducer report covering:
-
-1. THE FILE - Technical quality, format, bitrate, sample rate assessment
-2. THE SOUND - Genre, subgenre, instrumentation, production style, sonic comparisons based on all available data
-3. THE CRAFT - Music theory insights, structure, arrangement based on BPM, key, duration
-4. THE MARKET - Commercial positioning, comparable artists, chart viability, platform fit
-5. THE VERDICT - Score each category 1-10, overall score, full honest written breakdown
-
-Be specific, honest, and speak directly to the artist.`
-      }]
+    const { data, error } = await resend.emails.send({
+      from: 'Ducer <reports@ducer.app>',
+      to: [email],
+      bcc: ['vinny.olsauskas@gmail.com'],
+      subject,
+      html,
+      replyTo: 'vinny.olsauskas@gmail.com',
     })
 
-    return Response.json({ report: message.content[0].text })
+    if (error) {
+      console.error('Resend error:', error)
+      return Response.json({ error: error.message || 'Email failed to send.' }, { status: 500 })
+    }
+
+    return Response.json({ success: true, id: data?.id })
   } catch (error) {
-    console.error('Analysis error:', error)
-    return Response.json({ error: error.message }, { status: 500 })
+    console.error('Send report error:', error)
+    return Response.json(
+      { error: error.message || 'Something went wrong sending the email.' },
+      { status: 500 }
+    )
   }
+}
+
+function escapeHtml(str = '') {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
 }
