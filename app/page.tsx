@@ -65,6 +65,14 @@ const BATCHES: Record<number, number[]> = {
   4: [12],
 }
 
+// Section-to-batch mapping so API knows which prompt context to use
+const SECTION_BATCH: Record<number, number> = {
+  1: 1, 2: 1, 3: 1, 4: 1,
+  5: 2, 6: 2, 7: 2, 8: 2,
+  9: 3, 10: 3, 11: 3,
+  12: 4,
+}
+
 async function extractAudioFeatures(file: File): Promise<string> {
   const arrayBuffer = await file.arrayBuffer()
   const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)()
@@ -230,12 +238,13 @@ function getActiveSectionInBatch(text: string, sectionIds: number[]) {
 }
 
 function cleanLine(line: string) {
-  // Remove markdown bold, section headers, em dashes, and standalone --- lines
   return line
-    .replace(/\*\*/g, '')
+    .replace(/\*\*\*(.*?)\*\*\*/g, '$1')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/\*(.*?)\*/g, '$1')
     .replace(/^###\s*\d*\.?\s*/, '')
-    .replace(/\u2014/g, '-') // em dash → regular hyphen
-    .replace(/--/g, '-')     // double hyphen fallback
+    .replace(/\u2014/g, '-')
+    .replace(/--/g, '-')
     .trim()
 }
 
@@ -474,6 +483,43 @@ export default function Home() {
     }
   }
 
+  const runSection = async (sectionId: number, audioInfo: string, q: string) => {
+    const batchNum = SECTION_BATCH[sectionId]
+
+    // Show section box with loading bar immediately
+    setVisibleSections(prev => prev.includes(sectionId) ? prev : [...prev, sectionId])
+    setActiveSection(sectionId)
+
+    const res = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ audioInfo, question: q, batch: batchNum, sectionId })
+    })
+
+    if (!res.ok) throw new Error(`Server error: ${res.status}`)
+    if (!res.body) throw new Error('No response body')
+
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let sectionText = ''
+
+    while (true) {
+      const { done: streamDone, value } = await reader.read()
+      if (streamDone) break
+      const chunk = decoder.decode(value, { stream: true })
+      sectionText += chunk
+      rawReportRef.current += chunk
+    }
+
+    // Stream done — parse content, shoot bar to 100%, reveal text
+    const parsed = parseReport(sectionText, [sectionId])
+    setCompletingSections(prev => [...prev, sectionId])
+    await new Promise(r => setTimeout(r, 450))
+    setSectionContents(prev => ({ ...prev, ...parsed }))
+    setCompletedSections(prev => prev.includes(sectionId) ? prev : [...prev, sectionId])
+    setCompletingSections(prev => prev.filter(i => i !== sectionId))
+  }
+
   const runBatch = async (batch: number, audioInfo: string, q: string) => {
     const batchSections = BATCHES[batch]
 
@@ -534,11 +580,9 @@ export default function Home() {
     setSectionContents({})
     setCompletedSections([])
     setCompletingSections([])
-    setActiveSection(1)
+    setActiveSection(0)
     rawReportRef.current = ''
     initWordQueue()
-    // Show section 1 immediately so report screen appears the moment analyze is clicked
-    setVisibleSections([1])
 
     try {
       const { parseBlob } = await import('music-metadata-browser')
@@ -567,10 +611,9 @@ ${audioFeatures}
       setLoadingStage('')
       const q = question || 'Give me a full analysis'
 
-      await runBatch(1, audioInfo, q)
-      await runBatch(2, audioInfo, q)
-      await runBatch(3, audioInfo, q)
-      await runBatch(4, audioInfo, q)
+      for (let i = 1; i <= 12; i++) {
+        await runSection(i, audioInfo, q)
+      }
 
       setVisibleSections(SECTIONS.map(s => s.id))
       setActiveSection(0)
