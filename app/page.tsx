@@ -26,7 +26,6 @@ const taglines = [
 
 const randomTagline = taglines[Math.floor(Math.random() * taglines.length)]
 
-// Word bank for loading bars — 20 unique words, shuffled per session, never repeated
 const LOADING_WORDS_BANK = [
   'Analyzing', 'Evaluating', 'Decoding', 'Scanning', 'Examining',
   'Processing', 'Dissecting', 'Mapping', 'Profiling', 'Assessing',
@@ -65,7 +64,6 @@ const BATCHES: Record<number, number[]> = {
   4: [12],
 }
 
-// Section-to-batch mapping so API knows which prompt context to use
 const SECTION_BATCH: Record<number, number> = {
   1: 1, 2: 1, 3: 1, 4: 1,
   5: 2, 6: 2, 7: 2, 8: 2,
@@ -192,7 +190,7 @@ async function extractAudioFeatures(file: File): Promise<string> {
   }
 
   return `
---- AUDIO SIGNAL ANALYSIS ---
+--- AUDIO SIGNAL ANALYSIS (client-side) ---
 RMS Loudness: ${rmsDb.toFixed(1)} dBFS
 Peak Amplitude: ${peakDb.toFixed(1)} dBFS
 Crest Factor (Dynamic Range): ${crestFactor.toFixed(1)} dB
@@ -228,15 +226,6 @@ function parseReport(text: string, sectionIds: number[]) {
   return sections
 }
 
-function getActiveSectionInBatch(text: string, sectionIds: number[]) {
-  let active = sectionIds[0]
-  sectionIds.forEach(id => {
-    const regex = new RegExp(`##\\s*${id}[.\\s]`)
-    if (regex.test(text)) active = id
-  })
-  return active
-}
-
 function cleanLine(line: string) {
   return line
     .replace(/\*\*\*(.*?)\*\*\*/g, '$1')
@@ -254,7 +243,6 @@ function LoadingBar({ word, completing }: { word: string; completing: boolean })
 
   useEffect(() => {
     setProgress(0)
-    // Slowly crawl — accelerates early, slows near 90% (never reaches 100 on its own)
     let current = 0
     intervalRef.current = setInterval(() => {
       current += (90 - current) * 0.035
@@ -305,8 +293,6 @@ function SectionBlock({ section, content, isActive, visible, loadingWord, isComp
   isCompleting: boolean
 }) {
   const isVerdict = section.id === 12
-
-  // Only show content once the section is fully complete — never during streaming
   const showContent = isComplete && !!content
 
   const scores = { file: 0, sound: 0, craft: 0, market: 0, overall: 0 }
@@ -325,18 +311,17 @@ function SectionBlock({ section, content, isActive, visible, loadingWord, isComp
 
   const cleanContent = showContent
     ? content!
-        .replace(/^##\s*\d+[.\s][^\n]*\n?/m, '')   // remove opening header
-        .replace(/##\s*\d+[.\s][^\n]*/g, '')         // remove any leaked headers mid-content
+        .replace(/^##\s*\d+[.\s][^\n]*\n?/m, '')
+        .replace(/##\s*\d+[.\s][^\n]*/g, '')
         .trim()
     : ''
 
-  // Filter out standalone --- lines and clean em dashes
   const cleanLines = cleanContent
     .split('\n')
     .filter(l => {
       const trimmed = l.trim()
       if (!trimmed) return false
-      if (/^-{2,}$/.test(trimmed)) return false // remove --- lines
+      if (/^-{2,}$/.test(trimmed)) return false
       return true
     })
 
@@ -370,7 +355,6 @@ function SectionBlock({ section, content, isActive, visible, loadingWord, isComp
         <span style={{ fontFamily: 'monospace', fontSize: '11px', letterSpacing: '0.2em', color: isVerdict ? '#c8ff00' : isLoading ? '#c8ff00' : '#555', textTransform: 'uppercase', flex: 1 }}>
           {section.label}
         </span>
-        {/* Dot: only visible while actively loading, gone once complete */}
         <div style={{
           width: '6px', height: '6px', borderRadius: '50%',
           background: isActive ? '#c8ff00' : '#2a2a2a',
@@ -379,7 +363,6 @@ function SectionBlock({ section, content, isActive, visible, loadingWord, isComp
         }} />
       </div>
 
-      {/* Only the actively streaming section shows a loading bar */}
       {(isActive || isCompleting) && !showContent ? (
         <LoadingBar word={loadingWord} completing={isCompleting} />
       ) : isVerdict && showContent ? (
@@ -416,13 +399,8 @@ function SectionBlock({ section, content, isActive, visible, loadingWord, isComp
           {cleanLines.map((line, i) => {
             const cl = cleanLine(line)
             if (!cl) return null
-
             return (
-              <p key={i} style={{
-                marginBottom: '10px',
-                color: '#aaa',
-                fontSize: '13px',
-              }}>{cl}</p>
+              <p key={i} style={{ marginBottom: '10px', color: '#aaa', fontSize: '13px' }}>{cl}</p>
             )
           })}
         </div>
@@ -455,10 +433,8 @@ export default function Home() {
   const [activeSection, setActiveSection] = useState<number>(0)
   const rawReportRef = useRef('')
 
-  // Loading word bank — shuffled once per session, words consumed in order
   const wordQueueRef = useRef<string[]>([])
   const wordIndexRef = useRef(0)
-  // Map section id -> assigned word so each section keeps its word stable
   const sectionWordMapRef = useRef<Record<number, string>>({})
 
   const initWordQueue = () => {
@@ -475,7 +451,6 @@ export default function Home() {
     return word
   }
 
-  // Warn user if they try to refresh/close while analysis is running
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (!loading) return
@@ -493,50 +468,19 @@ export default function Home() {
     }
   }
 
-  const runSection = async (sectionId: number, audioInfo: string, q: string) => {
-    const batchNum = SECTION_BATCH[sectionId]
-
-    // Show section box with loading bar immediately
-    setVisibleSections(prev => prev.includes(sectionId) ? prev : [...prev, sectionId])
-    setActiveSection(sectionId)
-
-    const res = await fetch('/api/analyze', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ audioInfo, question: q, batch: batchNum, sectionId })
-    })
-
-    if (!res.ok) throw new Error(`Server error: ${res.status}`)
-    if (!res.body) throw new Error('No response body')
-
-    const reader = res.body.getReader()
-    const decoder = new TextDecoder()
-    let sectionText = ''
-
-    while (true) {
-      const { done: streamDone, value } = await reader.read()
-      if (streamDone) break
-      const chunk = decoder.decode(value, { stream: true })
-      sectionText += chunk
-      rawReportRef.current += chunk
-    }
-
-    // Stream done — parse content, shoot bar to 100%, reveal text
-    const parsed = parseReport(sectionText, [sectionId])
-    setCompletingSections(prev => [...prev, sectionId])
-    await new Promise(r => setTimeout(r, 450))
-    setSectionContents(prev => ({ ...prev, ...parsed }))
-    setCompletedSections(prev => prev.includes(sectionId) ? prev : [...prev, sectionId])
-    setCompletingSections(prev => prev.filter(i => i !== sectionId))
-  }
-
-  const runBatch = async (batch: number, audioInfo: string, q: string) => {
+  const runBatch = async (batch: number, audioInfo: string, q: string, audioFile: File | null) => {
     const batchSections = BATCHES[batch]
 
+    // ── Send as FormData so route.js can forward the file to librosa ──
+    const fd = new FormData()
+    fd.append('audioInfo', audioInfo)
+    fd.append('question', q)
+    fd.append('batch', String(batch))
+    if (audioFile) fd.append('audioFile', audioFile)
+
     const res = await fetch('/api/analyze', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ audioInfo, question: q, batch })
+      body: fd,
     })
 
     if (!res.ok) throw new Error(`Server error: ${res.status}`)
@@ -570,7 +514,6 @@ export default function Home() {
         const id = batchSections[i]
         const nextId = batchSections[i + 1]
 
-        // Show box as soon as its header appears
         if (!shownSections.includes(id)) {
           const regex = new RegExp(`##\\s*${id}[.\\s]`)
           if (regex.test(batchText)) {
@@ -580,7 +523,6 @@ export default function Home() {
           }
         }
 
-        // Reveal section content only once the next section's header is confirmed in stream
         if (nextId && shownSections.includes(id) && !revealedSections.includes(id)) {
           const nextRegex = new RegExp(`##\\s*${nextId}[.\\s]`)
           if (nextRegex.test(batchText)) {
@@ -590,7 +532,6 @@ export default function Home() {
       }
     }
 
-    // Reveal any remaining unrevealed sections now that stream is fully done
     for (let i = 0; i < batchSections.length; i++) {
       const id = batchSections[i]
       const nextId = batchSections[i + 1]
@@ -640,16 +581,15 @@ ${audioFeatures}
       setLoadingStage('')
       const q = question || 'Give me a full analysis'
 
-      await runBatch(1, audioInfo, q)
-      await runBatch(2, audioInfo, q)
-      await runBatch(3, audioInfo, q)
-      await runBatch(4, audioInfo, q)
+      await runBatch(1, audioInfo, q, file)
+      await runBatch(2, audioInfo, q, file)
+      await runBatch(3, audioInfo, q, file)
+      await runBatch(4, audioInfo, q, file)
 
       setVisibleSections(SECTIONS.map(s => s.id))
       setActiveSection(0)
       setDone(true)
     } catch (err: any) {
-      // Alert Vinny with full context but don't interrupt the user
       try {
         await fetch('/api/alert-error', {
           method: 'POST',
@@ -673,9 +613,7 @@ ${audioFeatures}
               : 'Unknown cause — see stack trace',
           })
         })
-      } catch (_) {
-        // silently fail
-      }
+      } catch (_) {}
       setError(err.message || 'Something went wrong. Please try again.')
     }
 
@@ -696,11 +634,7 @@ ${audioFeatures}
       })
 
       const data = await res.json()
-
-      if (!res.ok) {
-        throw new Error(data?.error || 'Failed to send report.')
-      }
-
+      if (!res.ok) throw new Error(data?.error || 'Failed to send report.')
       setSubmitted(true)
     } catch (err: any) {
       setError(err.message || 'Failed to send report.')
