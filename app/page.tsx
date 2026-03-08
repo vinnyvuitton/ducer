@@ -311,10 +311,10 @@ function SectionBlock({ section, content, isActive, visible, loadingWord, isComp
 
   const scores = { file: 0, sound: 0, craft: 0, market: 0, overall: 0 }
   if (isVerdict && showContent) {
-    const fileMatch = content.match(/File[:\s]+(\d+)/i)
-    const soundMatch = content.match(/Sound[:\s]+(\d+)/i)
-    const craftMatch = content.match(/Craft[:\s]+(\d+)/i)
-    const marketMatch = content.match(/Market[:\s]+(\d+)/i)
+    const fileMatch = content.match(/File(?:\s+Quality)?[:\s]+(\d+)/i)
+    const soundMatch = content.match(/Sound(?:[^:]*)?[:\s]+(\d+)/i)
+    const craftMatch = content.match(/Craft(?:[^:]*)?[:\s]+(\d+)/i)
+    const marketMatch = content.match(/Market(?:[^:]*)?[:\s]+(\d+)/i)
     const overallMatch = content.match(/Overall[^:]*:[^\d]*(\d+)/i)
     if (fileMatch) scores.file = parseInt(fileMatch[1])
     if (soundMatch) scores.sound = parseInt(soundMatch[1])
