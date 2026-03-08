@@ -547,6 +547,18 @@ export default function Home() {
     const decoder = new TextDecoder()
     let batchText = ''
     let shownSections: number[] = []
+    let revealedSections: number[] = []
+
+    const revealSection = async (id: number, text: string) => {
+      if (revealedSections.includes(id)) return
+      revealedSections = [...revealedSections, id]
+      const parsed = parseReport(text, [id])
+      setCompletingSections(prev => [...prev, id])
+      await new Promise(r => setTimeout(r, 450))
+      setSectionContents(prev => ({ ...prev, ...parsed }))
+      setCompletedSections(prev => prev.includes(id) ? prev : [...prev, id])
+      setCompletingSections(prev => prev.filter(i => i !== id))
+    }
 
     while (true) {
       const { done: streamDone, value } = await reader.read()
@@ -555,9 +567,11 @@ export default function Home() {
       batchText += chunk
       rawReportRef.current += chunk
 
-      // During streaming: only show section boxes + update active loading bar
-      // Never reveal content mid-stream — wait for full batch to finish
-      for (const id of batchSections) {
+      for (let i = 0; i < batchSections.length; i++) {
+        const id = batchSections[i]
+        const nextId = batchSections[i + 1]
+
+        // Show box as soon as its header appears
         if (!shownSections.includes(id)) {
           const regex = new RegExp(`##\\s*${id}[.\\s]`)
           if (regex.test(batchText)) {
@@ -566,20 +580,23 @@ export default function Home() {
             setActiveSection(id)
           }
         }
+
+        // Reveal previous section's content as soon as next section's header appears
+        if (nextId && shownSections.includes(id) && !revealedSections.includes(id)) {
+          const nextRegex = new RegExp(`##\\s*${nextId}[.\\s]`)
+          if (nextRegex.test(batchText)) {
+            revealSection(id, batchText)
+          }
+        }
       }
     }
 
-    // Stream fully done — shoot bars to 100%, wait, then set content + complete atomically
-    const finalParsed = parseReport(batchText, batchSections)
-    setCompletingSections(prev => [...prev, ...batchSections])
-    await new Promise(r => setTimeout(r, 450))
-    setSectionContents(prev => ({ ...prev, ...finalParsed }))
-    setCompletedSections(prev => {
-      const next = [...prev]
-      batchSections.forEach(id => { if (!next.includes(id)) next.push(id) })
-      return next
-    })
-    setCompletingSections(prev => prev.filter(id => !batchSections.includes(id)))
+    // Reveal any remaining unrevealed sections now that stream is done
+    for (const id of batchSections) {
+      if (!revealedSections.includes(id) && shownSections.includes(id)) {
+        await revealSection(id, batchText)
+      }
+    }
   }
 
   const analyze = async () => {
