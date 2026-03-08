@@ -426,6 +426,54 @@ function SectionBlock({ section, content, isActive, visible, loadingWord, isComp
   )
 }
 
+const LOADING_PHRASES = [
+  'Reading your track...',
+  'Pulling the signal apart...',
+  'Running the numbers...',
+  'Checking the file...',
+  'Mapping the structure...',
+  'Digging into the mix...',
+  'Cross-referencing the data...',
+  'Building your report...',
+  'Calibrating the analysis...',
+]
+
+function LoadingPhrase() {
+  const [index, setIndex] = useState(0)
+  const [visible, setVisible] = useState(true)
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setVisible(false)
+      setTimeout(() => {
+        setIndex(i => (i + 1) % LOADING_PHRASES.length)
+        setVisible(true)
+      }, 400)
+    }, 4000)
+    return () => clearInterval(interval)
+  }, [])
+
+  return (
+    <div style={{ padding: '60px 0', textAlign: 'center' }}>
+      <p style={{
+        fontFamily: 'monospace', fontSize: '10px', letterSpacing: '0.25em',
+        textTransform: 'uppercase',
+        background: 'linear-gradient(90deg, #333 25%, #c8ff00 50%, #333 75%)',
+        backgroundSize: '200% auto',
+        WebkitBackgroundClip: 'text',
+        WebkitTextFillColor: 'transparent',
+        backgroundClip: 'text',
+        animation: 'shimmer 2s linear infinite',
+        display: 'inline-block',
+        opacity: visible ? 1 : 0,
+        transition: 'opacity 0.4s ease',
+      }}>
+        {LOADING_PHRASES[index]}
+      </p>
+    </div>
+  )
+}
+
 export default function Home() {
   const [file, setFile] = useState<File | null>(null)
   const [dragging, setDragging] = useState(false)
@@ -807,21 +855,7 @@ ${librosaData}
 
       <div style={{ maxWidth: '960px', margin: '0 auto', padding: '40px' }}>
         {loading && visibleSections.length === 0 && (
-          <div style={{ padding: '60px 0', textAlign: 'center' }}>
-            <p style={{
-              fontFamily: 'monospace', fontSize: '10px', letterSpacing: '0.25em',
-              textTransform: 'uppercase',
-              background: 'linear-gradient(90deg, #333 25%, #c8ff00 50%, #333 75%)',
-              backgroundSize: '200% auto',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              backgroundClip: 'text',
-              animation: 'shimmer 2s linear infinite',
-              display: 'inline-block',
-            }}>
-              Reading your track...
-            </p>
-          </div>
+          <LoadingPhrase />
         )}
         {SECTIONS.map(section => (
           <SectionBlock
