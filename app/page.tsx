@@ -74,7 +74,7 @@ async function fetchLibrosaData(file: File): Promise<string> {
     const res = await fetch(`${audioServiceUrl}/analyze`, {
       method: 'POST',
       body: fd,
-      signal: AbortSignal.timeout(60000),
+      signal: AbortSignal.timeout(8000),
     })
     if (!res.ok) return ''
     const data = await res.json()
