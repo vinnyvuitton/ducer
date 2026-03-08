@@ -1,5 +1,5 @@
 'use client'
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect } from 'react'
 
 const taglines = [
   "The honest read on your music.",
@@ -328,30 +328,41 @@ function SectionBlock({ section, content, isActive, visible, loadingWord, isComp
       return true
     })
 
+  const isLoading = (isActive || isCompleting) && !showContent
+
   return (
     <div style={{
-      border: isVerdict ? '1px solid #c8ff00' : '1px solid #1a1a1a',
-      background: isVerdict ? 'rgba(200,255,0,0.04)' : '#0f0f0f',
+      border: isLoading ? '1px solid #c8ff00'
+        : isVerdict ? '1px solid #c8ff00'
+        : '1px solid #1a1a1a',
+      background: isVerdict ? 'rgba(200,255,0,0.04)'
+        : isLoading ? 'rgba(200,255,0,0.02)'
+        : '#0f0f0f',
       marginBottom: '2px',
       opacity: visible ? 1 : 0,
       transform: visible ? 'translateY(0)' : 'translateY(8px)',
-      transition: 'opacity 0.4s ease, transform 0.4s ease',
+      transition: 'opacity 0.4s ease, transform 0.4s ease, border-color 0.3s ease',
     }}>
       <div style={{
         display: 'flex', alignItems: 'center', padding: '14px 20px',
-        borderBottom: isVerdict ? '1px solid rgba(200,255,0,0.15)' : '1px solid #1a1a1a',
-        background: isVerdict ? 'rgba(200,255,0,0.04)' : '#0c0c0c',
+        borderBottom: isVerdict ? '1px solid rgba(200,255,0,0.15)'
+          : isLoading ? '1px solid rgba(200,255,0,0.15)'
+          : '1px solid #1a1a1a',
+        background: isVerdict ? 'rgba(200,255,0,0.04)'
+          : isLoading ? 'rgba(200,255,0,0.03)'
+          : '#0c0c0c',
       }}>
         <span style={{ fontFamily: 'monospace', fontSize: '10px', color: '#333', letterSpacing: '0.15em', marginRight: '16px' }}>
           {String(section.id).padStart(2, '0')}
         </span>
-        <span style={{ fontFamily: 'monospace', fontSize: '11px', letterSpacing: '0.2em', color: isVerdict ? '#c8ff00' : '#555', textTransform: 'uppercase', flex: 1 }}>
+        <span style={{ fontFamily: 'monospace', fontSize: '11px', letterSpacing: '0.2em', color: isVerdict ? '#c8ff00' : isLoading ? '#c8ff00' : '#555', textTransform: 'uppercase', flex: 1 }}>
           {section.label}
         </span>
+        {/* Dot: only visible while actively loading, gone once complete */}
         <div style={{
           width: '6px', height: '6px', borderRadius: '50%',
-          background: isComplete ? '#c8ff00' : isActive ? '#c8ff00' : '#2a2a2a',
-          boxShadow: (isComplete || isActive) ? '0 0 6px #c8ff00' : 'none',
+          background: isActive ? '#c8ff00' : '#2a2a2a',
+          boxShadow: isActive ? '0 0 6px #c8ff00' : 'none',
           animation: isActive ? 'pulse 1s ease-in-out infinite' : 'none',
         }} />
       </div>
@@ -462,7 +473,6 @@ export default function Home() {
 
   const runBatch = async (batch: number, audioInfo: string, q: string) => {
     const batchSections = BATCHES[batch]
-    // Don't show all sections upfront — reveal them one at a time as stream progresses
 
     const res = await fetch('/api/analyze', {
       method: 'POST',
@@ -477,6 +487,7 @@ export default function Home() {
     const decoder = new TextDecoder()
     let batchText = ''
     let shownSections: number[] = []
+    let prevSection: number | null = null
 
     while (true) {
       const { done: streamDone, value } = await reader.read()
@@ -486,26 +497,42 @@ export default function Home() {
       rawReportRef.current += chunk
 
       // Reveal each section the moment its header appears in the stream
-      batchSections.forEach(id => {
+      for (const id of batchSections) {
         if (!shownSections.includes(id)) {
           const regex = new RegExp(`##\\s*${id}[.\\s]`)
           if (regex.test(batchText)) {
             shownSections = [...shownSections, id]
             setVisibleSections(prev => prev.includes(id) ? prev : [...prev, id])
             setActiveSection(id)
+
+            // When a NEW section starts, the PREVIOUS section is done streaming
+            // Complete the previous one: shoot bar to 100%, parse it, reveal text
+            if (prevSection !== null) {
+              const prevId = prevSection
+              const parsed = parseReport(batchText, [prevId])
+              setSectionContents(prev => ({ ...prev, ...parsed }))
+              setCompletingSections(prev => [...prev, prevId])
+              setTimeout(() => {
+                setCompletedSections(prev => [...prev, prevId])
+                setCompletingSections(prev => prev.filter(i => i !== prevId))
+              }, 400)
+            }
+            prevSection = id
           }
         }
-      })
+      }
     }
 
-    // Stream done — parse all sections, shoot active bar to 100%, then reveal
+    // Stream fully done — complete the last section (and any stragglers)
     const finalParsed = parseReport(batchText, batchSections)
     setSectionContents(prev => ({ ...prev, ...finalParsed }))
-
-    // Animate the last active bar to 100% before revealing
     setCompletingSections(prev => [...prev, ...batchSections])
-    await new Promise(r => setTimeout(r, 450))
-    setCompletedSections(prev => [...prev, ...batchSections])
+    await new Promise(r => setTimeout(r, 400))
+    setCompletedSections(prev => {
+      const next = [...prev]
+      batchSections.forEach(id => { if (!next.includes(id)) next.push(id) })
+      return next
+    })
     setCompletingSections(prev => prev.filter(id => !batchSections.includes(id)))
   }
 
