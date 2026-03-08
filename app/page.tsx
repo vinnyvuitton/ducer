@@ -478,6 +478,11 @@ export default function Home() {
     if (f && f.type.startsWith('audio/')) {
       setFile(f)
       setFilename(f.name)
+      // Wake Render service on file drop — fire and forget
+      const audioServiceUrl = process.env.NEXT_PUBLIC_AUDIO_SERVICE_URL
+      if (audioServiceUrl) {
+        fetch(`${audioServiceUrl}/health`).catch(() => {})
+      }
     }
   }
 
