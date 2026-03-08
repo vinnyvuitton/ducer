@@ -239,20 +239,25 @@ function cleanLine(line: string) {
     .trim()
 }
 
-function LoadingBar({ word }: { word: string }) {
+function LoadingBar({ word, completing }: { word: string; completing: boolean }) {
   const [progress, setProgress] = useState(0)
 
   useEffect(() => {
     setProgress(0)
-    // Animate to a random "stuck" point between 40-85% to feel realistic
-    const target = 40 + Math.random() * 45
+    // Animate to a realistic "stuck" point — not 100%, feels alive
+    const target = 35 + Math.random() * 40
     const timer = setTimeout(() => setProgress(target), 50)
     return () => clearTimeout(timer)
   }, [word])
 
+  useEffect(() => {
+    // When batch completes, shoot bar to 100% before content reveals
+    if (completing) setProgress(100)
+  }, [completing])
+
   return (
     <div style={{ padding: '20px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
+      <div style={{ marginBottom: '10px' }}>
         <span style={{
           fontFamily: 'monospace', fontSize: '10px', color: '#c8ff00',
           letterSpacing: '0.2em', textTransform: 'uppercase',
@@ -265,7 +270,9 @@ function LoadingBar({ word }: { word: string }) {
           height: '100%',
           background: 'linear-gradient(90deg, #c8ff00, #a0cc00)',
           width: `${progress}%`,
-          transition: 'width 1.8s cubic-bezier(0.16, 1, 0.3, 1)',
+          transition: completing
+            ? 'width 0.4s cubic-bezier(0.16, 1, 0.3, 1)'
+            : 'width 2.2s cubic-bezier(0.16, 1, 0.3, 1)',
           boxShadow: '0 0 8px rgba(200,255,0,0.4)',
         }} />
       </div>
@@ -273,13 +280,14 @@ function LoadingBar({ word }: { word: string }) {
   )
 }
 
-function SectionBlock({ section, content, isActive, visible, loadingWord, isComplete }: {
+function SectionBlock({ section, content, isActive, visible, loadingWord, isComplete, isCompleting }: {
   section: { id: number; label: string }
   content?: string
   isActive: boolean
   visible: boolean
   loadingWord: string
   isComplete: boolean
+  isCompleting: boolean
 }) {
   const isVerdict = section.id === 12
 
@@ -336,15 +344,15 @@ function SectionBlock({ section, content, isActive, visible, loadingWord, isComp
         </span>
         <div style={{
           width: '6px', height: '6px', borderRadius: '50%',
-          background: isActive ? '#c8ff00' : (content ? '#c8ff00' : '#2a2a2a'),
-          boxShadow: (isActive || content) ? '0 0 6px #c8ff00' : 'none',
+          background: isComplete ? '#c8ff00' : isActive ? '#c8ff00' : '#2a2a2a',
+          boxShadow: (isComplete || isActive) ? '0 0 6px #c8ff00' : 'none',
           animation: isActive ? 'pulse 1s ease-in-out infinite' : 'none',
         }} />
       </div>
 
-      {/* Loading bar: show when active OR when visible but not yet complete */}
-      {(isActive || (visible && !isComplete)) && !showContent ? (
-        <LoadingBar word={loadingWord} />
+      {/* Only the actively streaming section shows a loading bar */}
+      {(isActive || isCompleting) && !showContent ? (
+        <LoadingBar word={loadingWord} completing={isCompleting} />
       ) : isVerdict && showContent ? (
         <div style={{ opacity: isComplete ? 1 : 0, transition: 'opacity 0.5s ease' }}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '2px', padding: '20px', borderBottom: '1px solid rgba(200,255,0,0.1)' }}>
@@ -415,6 +423,7 @@ export default function Home() {
   const [visibleSections, setVisibleSections] = useState<number[]>([])
   const [sectionContents, setSectionContents] = useState<Record<number, string>>({})
   const [completedSections, setCompletedSections] = useState<number[]>([])
+  const [completingSections, setCompletingSections] = useState<number[]>([])
   const [activeSection, setActiveSection] = useState<number>(0)
   const rawReportRef = useRef('')
 
@@ -478,10 +487,13 @@ export default function Home() {
       setActiveSection(active)
     }
 
-    // Batch fully done — now parse and reveal all at once
+    // Batch fully done — parse content, shoot bars to 100%, then reveal after delay
     const finalParsed = parseReport(batchText, batchSections)
     setSectionContents(prev => ({ ...prev, ...finalParsed }))
+    setCompletingSections(prev => [...prev, ...batchSections])
+    await new Promise(r => setTimeout(r, 500)) // bar animates to 100%
     setCompletedSections(prev => [...prev, ...batchSections])
+    setCompletingSections(prev => prev.filter(id => !batchSections.includes(id)))
   }
 
   const analyze = async () => {
@@ -492,6 +504,7 @@ export default function Home() {
     setVisibleSections([])
     setSectionContents({})
     setCompletedSections([])
+    setCompletingSections([])
     setActiveSection(0)
     rawReportRef.current = ''
     initWordQueue()
@@ -591,6 +604,7 @@ ${audioFeatures}
     setVisibleSections([])
     setSectionContents({})
     setCompletedSections([])
+    setCompletingSections([])
     setActiveSection(0)
     setLoading(false)
     setLoadingStage('')
@@ -721,6 +735,7 @@ ${audioFeatures}
             visible={visibleSections.includes(section.id)}
             loadingWord={getWordForSection(section.id)}
             isComplete={completedSections.includes(section.id)}
+            isCompleting={completingSections.includes(section.id)}
           />
         ))}
 
