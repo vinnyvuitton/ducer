@@ -708,7 +708,7 @@ ${librosaData}
 
   return (
     <main style={{ minHeight: '100vh', background: '#080808', color: '#e8e8e8', fontFamily: 'sans-serif' }}>
-      <style>{`@keyframes pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }`}</style>
+      <style>{`@keyframes pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } } @keyframes shimmer { 0% { background-position: 200% center; } 100% { background-position: -200% center; } }`}</style>
 
       <div style={{
         borderBottom: '1px solid #1a1a1a', padding: '24px 40px 20px',
@@ -736,7 +736,16 @@ ${librosaData}
       <div style={{ maxWidth: '960px', margin: '0 auto', padding: '40px' }}>
         {loading && visibleSections.length === 0 && (
           <div style={{ padding: '60px 0', textAlign: 'center' }}>
-            <p style={{ fontFamily: 'monospace', fontSize: '10px', color: '#333', letterSpacing: '0.25em', textTransform: 'uppercase' }}>
+            <p style={{
+              fontFamily: 'monospace', fontSize: '10px', letterSpacing: '0.25em',
+              textTransform: 'uppercase',
+              background: 'linear-gradient(90deg, #333 25%, #c8ff00 50%, #333 75%)',
+              backgroundSize: '200% auto',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              backgroundClip: 'text',
+              animation: 'shimmer 2s linear infinite',
+            }}>
               Reading your track...
             </p>
           </div>
