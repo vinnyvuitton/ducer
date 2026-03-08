@@ -315,7 +315,10 @@ function SectionBlock({ section, content, isActive, visible, loadingWord, isComp
   }
 
   const cleanContent = showContent
-    ? content!.replace(/^##\s*\d+[.\s][^\n]*\n/, '').trim()
+    ? content!
+        .replace(/^##\s*\d+[.\s][^\n]*\n?/m, '')   // remove opening header
+        .replace(/##\s*\d+[.\s][^\n]*/g, '')         // remove any leaked headers mid-content
+        .trim()
     : ''
 
   // Filter out standalone --- lines and clean em dashes
@@ -545,9 +548,11 @@ export default function Home() {
     setSectionContents({})
     setCompletedSections([])
     setCompletingSections([])
-    setActiveSection(0)
+    setActiveSection(1)
     rawReportRef.current = ''
     initWordQueue()
+    // Show section 1 immediately so report screen appears the moment analyze is clicked
+    setVisibleSections([1])
 
     try {
       const { parseBlob } = await import('music-metadata-browser')
@@ -651,7 +656,7 @@ ${audioFeatures}
     rawReportRef.current = ''
   }
 
-  if (!loading && Object.keys(sectionContents).length === 0 && !done) {
+  if (!loading && !done && visibleSections.length === 0) {
     return (
       <main style={{ minHeight: '100vh', background: '#080808', color: '#e8e8e8', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '16px', fontFamily: 'sans-serif' }}>
         <p style={{ fontFamily: 'monospace', fontSize: '10px', letterSpacing: '0.3em', color: '#555', textTransform: 'uppercase', marginBottom: '16px' }}>Music Intelligence</p>
