@@ -241,18 +241,24 @@ function cleanLine(line: string) {
 
 function LoadingBar({ word, completing }: { word: string; completing: boolean }) {
   const [progress, setProgress] = useState(0)
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
     setProgress(0)
-    // Animate to a realistic "stuck" point — not 100%, feels alive
-    const target = 35 + Math.random() * 40
-    const timer = setTimeout(() => setProgress(target), 50)
-    return () => clearTimeout(timer)
+    // Slowly crawl — accelerates early, slows near 90% (never reaches 100 on its own)
+    let current = 0
+    intervalRef.current = setInterval(() => {
+      current += (90 - current) * 0.035
+      setProgress(current)
+    }, 120)
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
   }, [word])
 
   useEffect(() => {
-    // When batch completes, shoot bar to 100% before content reveals
-    if (completing) setProgress(100)
+    if (completing) {
+      if (intervalRef.current) clearInterval(intervalRef.current)
+      setProgress(100)
+    }
   }, [completing])
 
   return (
@@ -271,8 +277,8 @@ function LoadingBar({ word, completing }: { word: string; completing: boolean })
           background: 'linear-gradient(90deg, #c8ff00, #a0cc00)',
           width: `${progress}%`,
           transition: completing
-            ? 'width 0.4s cubic-bezier(0.16, 1, 0.3, 1)'
-            : 'width 2.2s cubic-bezier(0.16, 1, 0.3, 1)',
+            ? 'width 0.35s cubic-bezier(0.16, 1, 0.3, 1)'
+            : 'width 0.12s linear',
           boxShadow: '0 0 8px rgba(200,255,0,0.4)',
         }} />
       </div>
@@ -456,11 +462,7 @@ export default function Home() {
 
   const runBatch = async (batch: number, audioInfo: string, q: string) => {
     const batchSections = BATCHES[batch]
-    setVisibleSections(prev => {
-      const updated = [...prev]
-      batchSections.forEach(id => { if (!updated.includes(id)) updated.push(id) })
-      return updated
-    })
+    // Don't show all sections upfront — reveal them one at a time as stream progresses
 
     const res = await fetch('/api/analyze', {
       method: 'POST',
@@ -474,6 +476,7 @@ export default function Home() {
     const reader = res.body.getReader()
     const decoder = new TextDecoder()
     let batchText = ''
+    let shownSections: number[] = []
 
     while (true) {
       const { done: streamDone, value } = await reader.read()
@@ -482,16 +485,26 @@ export default function Home() {
       batchText += chunk
       rawReportRef.current += chunk
 
-      // Only update active section indicator during streaming — NOT content
-      const active = getActiveSectionInBatch(batchText, batchSections)
-      setActiveSection(active)
+      // Reveal each section the moment its header appears in the stream
+      batchSections.forEach(id => {
+        if (!shownSections.includes(id)) {
+          const regex = new RegExp(`##\\s*${id}[.\\s]`)
+          if (regex.test(batchText)) {
+            shownSections = [...shownSections, id]
+            setVisibleSections(prev => prev.includes(id) ? prev : [...prev, id])
+            setActiveSection(id)
+          }
+        }
+      })
     }
 
-    // Batch fully done — parse content, shoot bars to 100%, then reveal after delay
+    // Stream done — parse all sections, shoot active bar to 100%, then reveal
     const finalParsed = parseReport(batchText, batchSections)
     setSectionContents(prev => ({ ...prev, ...finalParsed }))
+
+    // Animate the last active bar to 100% before revealing
     setCompletingSections(prev => [...prev, ...batchSections])
-    await new Promise(r => setTimeout(r, 500)) // bar animates to 100%
+    await new Promise(r => setTimeout(r, 450))
     setCompletedSections(prev => [...prev, ...batchSections])
     setCompletingSections(prev => prev.filter(id => !batchSections.includes(id)))
   }
