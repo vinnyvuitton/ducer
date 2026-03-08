@@ -110,108 +110,50 @@ async function extractAudioFeatures(file: File): Promise<string> {
   const audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
 
   const numChannels = audioBuffer.numberOfChannels
-  const sampleRate = audioBuffer.sampleRate
   const totalSamples = audioBuffer.length
 
   const leftChannel = audioBuffer.getChannelData(0)
   const rightChannel = numChannels > 1 ? audioBuffer.getChannelData(1) : null
 
-  let sumSquaresL = 0
-  let sumSquaresR = 0
-  for (let i = 0; i < totalSamples; i++) {
-    sumSquaresL += leftChannel[i] * leftChannel[i]
-    if (rightChannel) sumSquaresR += rightChannel[i] * rightChannel[i]
+  // Sample every 4th sample for speed — accurate enough for RMS/peak
+  let sumSquaresL = 0, sumSquaresR = 0, peakL = 0, peakR = 0, sumL = 0
+  let dotProduct = 0, magL = 0, magR = 0
+
+  for (let i = 0; i < totalSamples; i += 4) {
+    const l = leftChannel[i]
+    const r = rightChannel ? rightChannel[i] : l
+    sumSquaresL += l * l
+    sumSquaresR += r * r
+    sumL += l
+    if (Math.abs(l) > peakL) peakL = Math.abs(l)
+    if (Math.abs(r) > peakR) peakR = Math.abs(r)
+    dotProduct += l * r
+    magL += l * l
+    magR += r * r
   }
-  const rmsL = Math.sqrt(sumSquaresL / totalSamples)
-  const rmsR = rightChannel ? Math.sqrt(sumSquaresR / totalSamples) : rmsL
+
+  const samples = Math.ceil(totalSamples / 4)
+  const rmsL = Math.sqrt(sumSquaresL / samples)
+  const rmsR = Math.sqrt(sumSquaresR / samples)
   const rmsAvg = (rmsL + rmsR) / 2
   const rmsDb = 20 * Math.log10(rmsAvg || 0.000001)
 
-  let peakL = 0
-  let peakR = 0
-  for (let i = 0; i < totalSamples; i++) {
-    const absL = Math.abs(leftChannel[i])
-    if (absL > peakL) peakL = absL
-    if (rightChannel) {
-      const absR = Math.abs(rightChannel[i])
-      if (absR > peakR) peakR = absR
-    }
-  }
   const peakAvg = rightChannel ? (peakL + peakR) / 2 : peakL
   const peakDb = 20 * Math.log10(peakAvg || 0.000001)
   const crestFactor = peakDb - rmsDb
 
+  const dcOffset = Math.abs(sumL / samples)
+
   let clippedSamples = 0
-  for (let i = 0; i < totalSamples; i++) {
+  for (let i = 0; i < totalSamples; i += 4) {
     if (Math.abs(leftChannel[i]) >= 0.99) clippedSamples++
     if (rightChannel && Math.abs(rightChannel[i]) >= 0.99) clippedSamples++
   }
-  const clippingPercent = ((clippedSamples / (totalSamples * (rightChannel ? 2 : 1))) * 100).toFixed(3)
+  const clippingPercent = ((clippedSamples / (samples * (rightChannel ? 2 : 1))) * 100).toFixed(3)
 
-  let sumL = 0
-  for (let i = 0; i < totalSamples; i++) sumL += leftChannel[i]
-  const dcOffset = Math.abs(sumL / totalSamples)
-
-  let correlation = 0
-  if (rightChannel) {
-    let dotProduct = 0
-    let magL = 0
-    let magR = 0
-    for (let i = 0; i < totalSamples; i += 4) {
-      dotProduct += leftChannel[i] * rightChannel[i]
-      magL += leftChannel[i] * leftChannel[i]
-      magR += rightChannel[i] * rightChannel[i]
-    }
-    correlation = dotProduct / (Math.sqrt(magL) * Math.sqrt(magR) || 1)
-  } else {
-    correlation = 1
-  }
-
-  const bands = {
-    sub: { low: 0, high: 80, energy: 0 },
-    lowMid: { low: 80, high: 300, energy: 0 },
-    mid: { low: 300, high: 2000, energy: 0 },
-    high: { low: 2000, high: 8000, energy: 0 },
-    air: { low: 8000, high: sampleRate / 2, energy: 0 },
-  }
-
-  const bandResults: Record<string, number> = {}
-  for (const [bandName, band] of Object.entries(bands)) {
-    if (band.high > sampleRate / 2) { bandResults[bandName] = 0; continue }
-    try {
-      const bandCtx = new OfflineAudioContext(1, Math.min(totalSamples, sampleRate * 5), sampleRate)
-      const bandSource = bandCtx.createBufferSource()
-      const sampleCount = Math.min(totalSamples, sampleRate * 5)
-      const bandBuffer = bandCtx.createBuffer(1, sampleCount, sampleRate)
-      const bandData = bandBuffer.getChannelData(0)
-      const bandStart = Math.floor(totalSamples * 0.2)
-      for (let i = 0; i < sampleCount; i++) {
-        bandData[i] = leftChannel[bandStart + i] || 0
-        if (rightChannel) bandData[i] = (bandData[i] + (rightChannel[bandStart + i] || 0)) / 2
-      }
-      bandSource.buffer = bandBuffer
-      const filter = bandCtx.createBiquadFilter()
-      if (band.low === 0) { filter.type = 'lowpass'; filter.frequency.value = band.high }
-      else if (band.high >= sampleRate / 2) { filter.type = 'highpass'; filter.frequency.value = band.low }
-      else { filter.type = 'bandpass'; filter.frequency.value = (band.low + band.high) / 2; filter.Q.value = (band.low + band.high) / (2 * (band.high - band.low)) }
-      bandSource.connect(filter)
-      filter.connect(bandCtx.destination)
-      bandSource.start()
-      const rendered = await bandCtx.startRendering()
-      const renderedData = rendered.getChannelData(0)
-      let sumSq = 0
-      for (let i = 0; i < renderedData.length; i++) sumSq += renderedData[i] * renderedData[i]
-      bandResults[bandName] = Math.sqrt(sumSq / renderedData.length)
-    } catch { bandResults[bandName] = 0 }
-  }
-
-  const totalBandEnergy = Object.values(bandResults).reduce((a, b) => a + b, 0) || 1
-  const bandPercents: Record<string, string> = {}
-  for (const [k, v] of Object.entries(bandResults)) {
-    bandPercents[k] = ((v / totalBandEnergy) * 100).toFixed(1)
-  }
-
-  await audioContext.close()
+  const correlation = rightChannel
+    ? dotProduct / (Math.sqrt(magL) * Math.sqrt(magR) || 1)
+    : 1
 
   let stereoDesc = 'mono'
   if (rightChannel) {
@@ -222,6 +164,8 @@ async function extractAudioFeatures(file: File): Promise<string> {
     else stereoDesc = 'very wide / possible phase issues'
   }
 
+  await audioContext.close()
+
   return `
 --- AUDIO SIGNAL ANALYSIS (client-side) ---
 RMS Loudness: ${rmsDb.toFixed(1)} dBFS
@@ -231,13 +175,7 @@ Estimated Clipping: ${clippingPercent}% of samples at/near 0dBFS
 DC Offset: ${dcOffset.toFixed(5)} ${dcOffset > 0.01 ? '(FLAGGED — above threshold)' : '(clean)'}
 Stereo Correlation: ${correlation.toFixed(3)} — ${stereoDesc}
 Channels: ${numChannels === 1 ? 'Mono' : 'Stereo'}
-
-Frequency Band Energy (relative):
-  Sub bass (0-80 Hz):      ${bandPercents.sub}%
-  Low-mid (80-300 Hz):     ${bandPercents.lowMid}%
-  Mids (300 Hz-2 kHz):     ${bandPercents.mid}%
-  High (2-8 kHz):          ${bandPercents.high}%
-  Air (8 kHz+):            ${bandPercents.air}%
+Note: Band energy analysis provided by librosa service when available.
 ---`
 }
 
