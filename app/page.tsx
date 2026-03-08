@@ -549,13 +549,13 @@ export default function Home() {
     let shownSections: number[] = []
     let revealedSections: number[] = []
 
-    const revealSection = async (id: number, text: string) => {
+    const revealSection = async (id: number, nextId: number | undefined, text: string) => {
       if (revealedSections.includes(id)) return
       revealedSections = [...revealedSections, id]
-      const parsed = parseReport(text, [id])
+      const parsed = parseReport(text, nextId ? [id, nextId] : [id])
       setCompletingSections(prev => [...prev, id])
       await new Promise(r => setTimeout(r, 450))
-      setSectionContents(prev => ({ ...prev, ...parsed }))
+      setSectionContents(prev => ({ ...prev, [id]: parsed[id] ?? '' }))
       setCompletedSections(prev => prev.includes(id) ? prev : [...prev, id])
       setCompletingSections(prev => prev.filter(i => i !== id))
     }
@@ -581,20 +581,22 @@ export default function Home() {
           }
         }
 
-        // Reveal previous section's content as soon as next section's header appears
+        // Reveal section content only once the next section's header is confirmed in stream
         if (nextId && shownSections.includes(id) && !revealedSections.includes(id)) {
           const nextRegex = new RegExp(`##\\s*${nextId}[.\\s]`)
           if (nextRegex.test(batchText)) {
-            revealSection(id, batchText)
+            revealSection(id, nextId, batchText)
           }
         }
       }
     }
 
-    // Reveal any remaining unrevealed sections now that stream is done
-    for (const id of batchSections) {
+    // Reveal any remaining unrevealed sections now that stream is fully done
+    for (let i = 0; i < batchSections.length; i++) {
+      const id = batchSections[i]
+      const nextId = batchSections[i + 1]
       if (!revealedSections.includes(id) && shownSections.includes(id)) {
-        await revealSection(id, batchText)
+        await revealSection(id, nextId, batchText)
       }
     }
   }
