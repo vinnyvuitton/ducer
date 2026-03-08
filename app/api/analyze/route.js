@@ -2,36 +2,27 @@ import Anthropic from '@anthropic-ai/sdk'
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
-// Set AUDIO_SERVICE_URL in Vercel env vars once your Render service is live
-// e.g. https://ducer-audio-service.onrender.com
 const AUDIO_SERVICE_URL = process.env.AUDIO_SERVICE_URL || null
 
-// ─── Fetch enriched audio data from librosa microservice ──────────────────
 async function getLibrosaData(audioFile) {
   if (!AUDIO_SERVICE_URL || !audioFile) return null
-
   try {
     const formData = new FormData()
     formData.append('file', audioFile)
-
     const res = await fetch(`${AUDIO_SERVICE_URL}/analyze`, {
       method: 'POST',
       body: formData,
-      signal: AbortSignal.timeout(60000), // 60s timeout
+      signal: AbortSignal.timeout(60000),
     })
-
     if (!res.ok) return null
     return await res.json()
   } catch {
-    // Gracefully degrade — analysis still runs without librosa data
     return null
   }
 }
 
-// ─── Merge librosa data into the audioInfo string ─────────────────────────
 function buildEnrichedAudioInfo(baseAudioInfo, librosaData) {
   if (!librosaData || librosaData.error) return baseAudioInfo
-
   const b = librosaData.band_energy_percent || {}
   const enrichment = `
 --- LIBROSA SIGNAL ANALYSIS (server-side, high accuracy) ---
@@ -46,16 +37,14 @@ Spectral Bandwidth: ${librosaData.spectral_bandwidth_hz} Hz
 Zero Crossing Rate: ${librosaData.zero_crossing_rate}
 Onset Strength (attack density): ${librosaData.onset_strength_mean}
 Frequency Band Energy:
-  Sub bass (20–80 Hz):   ${b.sub_bass_20_80hz}%
-  Low-mid (80–300 Hz):   ${b.low_mid_80_300hz}%
-  Mids (300 Hz–2 kHz):   ${b.mids_300hz_2khz}%
-  High (2–8 kHz):        ${b.high_2_8khz}%
+  Sub bass (20-80 Hz):   ${b.sub_bass_20_80hz}%
+  Low-mid (80-300 Hz):   ${b.low_mid_80_300hz}%
+  Mids (300 Hz-2 kHz):   ${b.mids_300hz_2khz}%
+  High (2-8 kHz):        ${b.high_2_8khz}%
   Air (8 kHz+):          ${b.air_8khz_plus}%`
-
   return baseAudioInfo + enrichment
 }
 
-// ─── Batch prompts ────────────────────────────────────────────────────────
 const BATCH_PROMPTS = {
   1: `You are Ducer — a music intelligence engine operating as a hybrid of A&R evaluator, producer consultant, market strategist, and risk assessor.
 
@@ -72,7 +61,7 @@ AUDIO DATA:
 
 ARTIST GOAL: {question}
 
-Produce sections 1–4. Every section is mandatory. Use exactly these headers:
+Produce sections 1-4. Every section is mandatory. Use exactly these headers:
 
 ## 1. SONG IDENTITY
 State what this song is based on all available data. Artist, title, format, duration. Note source quality flags (low bitrate, lossy conversion, mono, missing tags). If data is missing, say what is missing and what that limits.
@@ -98,7 +87,7 @@ CORE DOCTRINE:
 AUDIO DATA:
 {audioInfo}
 
-Produce sections 5–8. Use exactly these headers:
+Produce sections 5-8. Use exactly these headers:
 
 ## 5. HOOK DURABILITY
 Evaluate the hook across all five dimensions. For each: give a rating (Low / Medium / Medium-High / High / Very High / Elite) AND explain the specific mechanism that earns that rating.
@@ -107,7 +96,7 @@ Evaluate the hook across all five dimensions. For each: give a rating (Low / Med
 3. Lyrical stickiness — are the words themselves memorable, or does the meaning carry it?
 4. Dynamic lift — does the song physically change in energy at the hook moment?
 5. Crowd participation viability — can a room of people participate without knowing the song?
-Then give an overall hook durability assessment in 2–3 sentences.
+Then give an overall hook durability assessment in 2-3 sentences.
 
 ## 6. PRODUCTION & ARRANGEMENT INTELLIGENCE
 Assess the production with specificity. Use the actual signal data — frequency band percentages, spectral centroid, onset strength — to ground your observations. Cover: instrument layers present or implied, percussion style and role, bass movement and low-end behavior (reference the sub/low-mid band percentages), stereo width, texture density, use of space. Answer: what is the center of gravity in this mix? What would a producer flag immediately?
@@ -120,7 +109,7 @@ Analyze lyric function directly. Answer all 8 questions:
 4. Does the title or chorus convert on its own?
 5. Is the writing specific, universal, or generic?
 6. Would it work without the performer's delivery?
-7. What is the cliché risk?
+7. What is the cliche risk?
 8. What would a top-tier writer tighten first?
 If lyrics are unavailable from metadata, state that clearly and assess based on genre, title, and structure.
 
@@ -144,13 +133,13 @@ CORE DOCTRINE:
 AUDIO DATA:
 {audioInfo}
 
-Produce sections 9–11. Use exactly these headers:
+Produce sections 9-11. Use exactly these headers:
 
 ## 9. MARKET & RELEASE POSITIONING
-Assess: hook accessibility for the target lane, radio viability (be specific about format), playlist compatibility (name the types), sync potential (what use cases — TV drama, ad, trailer, game?), viral potential (what platform and why), cultural/era alignment (is this early, aligned, or late to its trend wave?). Name 2–3 comparable artists whose leverage mechanism is similar. Explain the comparison. Separate artistic strength from commercial scalability.
+Assess: hook accessibility for the target lane, radio viability (be specific about format), playlist compatibility (name the types), sync potential (what use cases — TV drama, ad, trailer, game?), viral potential (what platform and why), cultural/era alignment (is this early, aligned, or late to its trend wave?). Name 2-3 comparable artists whose leverage mechanism is similar. Explain the comparison. Separate artistic strength from commercial scalability.
 
 ## 10. TRAJECTORY SCENARIOS
-Model three distinct scenarios. For each: scenario name, probability band (e.g. 35–50%), what must happen for it to occur, what could prevent it.
+Model three distinct scenarios. For each: scenario name, probability band (e.g. 35-50%), what must happen for it to occur, what could prevent it.
 
 Scenario A — Organic / fan-driven growth
 Scenario B — Editorial / playlist placement
@@ -183,28 +172,38 @@ Produce section 12. Use exactly this header:
 - Market Positioning: X/10
 - **Overall Ducer Score: X/10**
 
-**Written Verdict:** 4–6 sentences. State where this record stands, what lane it is competing in, what its real ceiling is, whether it has breakthrough identity or polish without inevitability, and what the single most important gap is. Be direct. No softening.
+**Written Verdict:** 4-6 sentences. State where this record stands, what lane it is competing in, what its real ceiling is, whether it has breakthrough identity or polish without inevitability, and what the single most important gap is. Be direct. No softening.
 
 **Ducer Improvement Priority:** One specific, immediately actionable recommendation. Name what to change, why it matters, and what outcome to expect. Something the artist can act on this week.`
 }
 
-// ─── Route handler ────────────────────────────────────────────────────────
 export async function POST(request) {
   try {
-    const formData = await request.formData()
-    const audioInfo = formData.get('audioInfo')
-    const question  = formData.get('question')
-    const batch     = parseInt(formData.get('batch'))
-    const audioFile = formData.get('audioFile') || null
+    let audioInfo, question, batch, audioFile
+
+    const contentType = request.headers.get('content-type') || ''
+
+    if (contentType.includes('multipart/form-data') || contentType.includes('application/x-www-form-urlencoded')) {
+      const formData = await request.formData()
+      audioInfo = formData.get('audioInfo')
+      question  = formData.get('question')
+      batch     = parseInt(formData.get('batch'))
+      audioFile = formData.get('audioFile') || null
+    } else {
+      const json = await request.json()
+      audioInfo = json.audioInfo
+      question  = json.question
+      batch     = parseInt(json.batch)
+      audioFile = null
+    }
 
     const promptTemplate = BATCH_PROMPTS[batch]
     if (!promptTemplate) {
       return Response.json({ error: 'Invalid batch' }, { status: 400 })
     }
 
-    // Enrich with librosa data if available
-    const librosaData    = await getLibrosaData(audioFile)
-    const enrichedAudio  = buildEnrichedAudioInfo(audioInfo, librosaData)
+    const librosaData   = await getLibrosaData(audioFile)
+    const enrichedAudio = buildEnrichedAudioInfo(audioInfo, librosaData)
 
     const prompt = promptTemplate
       .replace('{audioInfo}', enrichedAudio)
