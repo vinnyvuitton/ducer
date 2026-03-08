@@ -2,49 +2,6 @@ import Anthropic from '@anthropic-ai/sdk'
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
-const AUDIO_SERVICE_URL = process.env.AUDIO_SERVICE_URL || null
-
-async function getLibrosaData(audioFile) {
-  if (!AUDIO_SERVICE_URL || !audioFile) return null
-  try {
-    const formData = new FormData()
-    formData.append('file', audioFile)
-    const res = await fetch(`${AUDIO_SERVICE_URL}/analyze`, {
-      method: 'POST',
-      body: formData,
-      signal: AbortSignal.timeout(60000),
-    })
-    if (!res.ok) return null
-    return await res.json()
-  } catch {
-    return null
-  }
-}
-
-function buildEnrichedAudioInfo(baseAudioInfo, librosaData) {
-  if (!librosaData || librosaData.error) return baseAudioInfo
-  const b = librosaData.band_energy_percent || {}
-  const enrichment = `
---- LIBROSA SIGNAL ANALYSIS (server-side, high accuracy) ---
-BPM (detected from audio): ${librosaData.bpm}
-Key (detected from audio): ${librosaData.key}
-RMS Loudness: ${librosaData.rms_db} dBFS
-Peak: ${librosaData.peak_db} dBFS
-Crest Factor / Dynamic Range: ${librosaData.crest_factor_db} dB
-Spectral Centroid: ${librosaData.spectral_centroid_hz} Hz
-Spectral Rolloff: ${librosaData.spectral_rolloff_hz} Hz
-Spectral Bandwidth: ${librosaData.spectral_bandwidth_hz} Hz
-Zero Crossing Rate: ${librosaData.zero_crossing_rate}
-Onset Strength (attack density): ${librosaData.onset_strength_mean}
-Frequency Band Energy:
-  Sub bass (20-80 Hz):   ${b.sub_bass_20_80hz}%
-  Low-mid (80-300 Hz):   ${b.low_mid_80_300hz}%
-  Mids (300 Hz-2 kHz):   ${b.mids_300hz_2khz}%
-  High (2-8 kHz):        ${b.high_2_8khz}%
-  Air (8 kHz+):          ${b.air_8khz_plus}%`
-  return baseAudioInfo + enrichment
-}
-
 const BATCH_PROMPTS = {
   1: `You are Ducer — a music intelligence engine operating as a hybrid of A&R evaluator, producer consultant, market strategist, and risk assessor.
 
@@ -179,34 +136,15 @@ Produce section 12. Use exactly this header:
 
 export async function POST(request) {
   try {
-    let audioInfo, question, batch, audioFile
-
-    const contentType = request.headers.get('content-type') || ''
-
-    if (contentType.includes('multipart/form-data') || contentType.includes('application/x-www-form-urlencoded')) {
-      const formData = await request.formData()
-      audioInfo = formData.get('audioInfo')
-      question  = formData.get('question')
-      batch     = parseInt(formData.get('batch'))
-      audioFile = formData.get('audioFile') || null
-    } else {
-      const json = await request.json()
-      audioInfo = json.audioInfo
-      question  = json.question
-      batch     = parseInt(json.batch)
-      audioFile = null
-    }
+    const { audioInfo, question, batch } = await request.json()
 
     const promptTemplate = BATCH_PROMPTS[batch]
     if (!promptTemplate) {
       return Response.json({ error: 'Invalid batch' }, { status: 400 })
     }
 
-    const librosaData   = await getLibrosaData(audioFile)
-    const enrichedAudio = buildEnrichedAudioInfo(audioInfo, librosaData)
-
     const prompt = promptTemplate
-      .replace('{audioInfo}', enrichedAudio)
+      .replace('{audioInfo}', audioInfo)
       .replace('{question}', question || 'Give me a full analysis')
 
     const stream = await client.messages.stream({
@@ -219,10 +157,7 @@ export async function POST(request) {
     const readable = new ReadableStream({
       async start(controller) {
         for await (const chunk of stream) {
-          if (
-            chunk.type === 'content_block_delta' &&
-            chunk.delta.type === 'text_delta'
-          ) {
+          if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
             controller.enqueue(encoder.encode(chunk.delta.text))
           }
         }

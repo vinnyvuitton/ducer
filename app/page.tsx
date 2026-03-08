@@ -64,11 +64,44 @@ const BATCHES: Record<number, number[]> = {
   4: [12],
 }
 
-const SECTION_BATCH: Record<number, number> = {
-  1: 1, 2: 1, 3: 1, 4: 1,
-  5: 2, 6: 2, 7: 2, 8: 2,
-  9: 3, 10: 3, 11: 3,
-  12: 4,
+// ── Call Render librosa service directly from the browser ──────────────────
+async function fetchLibrosaData(file: File): Promise<string> {
+  const audioServiceUrl = process.env.NEXT_PUBLIC_AUDIO_SERVICE_URL
+  if (!audioServiceUrl) return ''
+  try {
+    const fd = new FormData()
+    fd.append('file', file)
+    const res = await fetch(`${audioServiceUrl}/analyze`, {
+      method: 'POST',
+      body: fd,
+      signal: AbortSignal.timeout(60000),
+    })
+    if (!res.ok) return ''
+    const data = await res.json()
+    if (data.error) return ''
+    const b = data.band_energy_percent || {}
+    return `
+--- LIBROSA SIGNAL ANALYSIS (server-side, high accuracy) ---
+BPM (detected from audio): ${data.bpm}
+Key (detected from audio): ${data.key}
+RMS Loudness: ${data.rms_db} dBFS
+Peak: ${data.peak_db} dBFS
+Crest Factor / Dynamic Range: ${data.crest_factor_db} dB
+Spectral Centroid: ${data.spectral_centroid_hz} Hz
+Spectral Rolloff: ${data.spectral_rolloff_hz} Hz
+Spectral Bandwidth: ${data.spectral_bandwidth_hz} Hz
+Zero Crossing Rate: ${data.zero_crossing_rate}
+Onset Strength (attack density): ${data.onset_strength_mean}
+Frequency Band Energy:
+  Sub bass (20-80 Hz):   ${b.sub_bass_20_80hz}%
+  Low-mid (80-300 Hz):   ${b.low_mid_80_300hz}%
+  Mids (300 Hz-2 kHz):   ${b.mids_300hz_2khz}%
+  High (2-8 kHz):        ${b.high_2_8khz}%
+  Air (8 kHz+):          ${b.air_8khz_plus}%
+---`
+  } catch {
+    return ''
+  }
 }
 
 async function extractAudioFeatures(file: File): Promise<string> {
@@ -261,10 +294,7 @@ function LoadingBar({ word, completing }: { word: string; completing: boolean })
   return (
     <div style={{ padding: '20px' }}>
       <div style={{ marginBottom: '10px' }}>
-        <span style={{
-          fontFamily: 'monospace', fontSize: '10px', color: '#c8ff00',
-          letterSpacing: '0.2em', textTransform: 'uppercase',
-        }}>
+        <span style={{ fontFamily: 'monospace', fontSize: '10px', color: '#c8ff00', letterSpacing: '0.2em', textTransform: 'uppercase' }}>
           {word}...
         </span>
       </div>
@@ -273,9 +303,7 @@ function LoadingBar({ word, completing }: { word: string; completing: boolean })
           height: '100%',
           background: 'linear-gradient(90deg, #c8ff00, #a0cc00)',
           width: `${progress}%`,
-          transition: completing
-            ? 'width 0.35s cubic-bezier(0.16, 1, 0.3, 1)'
-            : 'width 0.12s linear',
+          transition: completing ? 'width 0.35s cubic-bezier(0.16, 1, 0.3, 1)' : 'width 0.12s linear',
           boxShadow: '0 0 8px rgba(200,255,0,0.4)',
         }} />
       </div>
@@ -310,31 +338,22 @@ function SectionBlock({ section, content, isActive, visible, loadingWord, isComp
   }
 
   const cleanContent = showContent
-    ? content!
-        .replace(/^##\s*\d+[.\s][^\n]*\n?/m, '')
-        .replace(/##\s*\d+[.\s][^\n]*/g, '')
-        .trim()
+    ? content!.replace(/^##\s*\d+[.\s][^\n]*\n?/m, '').replace(/##\s*\d+[.\s][^\n]*/g, '').trim()
     : ''
 
-  const cleanLines = cleanContent
-    .split('\n')
-    .filter(l => {
-      const trimmed = l.trim()
-      if (!trimmed) return false
-      if (/^-{2,}$/.test(trimmed)) return false
-      return true
-    })
+  const cleanLines = cleanContent.split('\n').filter(l => {
+    const trimmed = l.trim()
+    if (!trimmed) return false
+    if (/^-{2,}$/.test(trimmed)) return false
+    return true
+  })
 
   const isLoading = (isActive || isCompleting) && !showContent
 
   return (
     <div style={{
-      border: isLoading ? '1px solid #c8ff00'
-        : isVerdict ? '1px solid #c8ff00'
-        : '1px solid #1a1a1a',
-      background: isVerdict ? 'rgba(200,255,0,0.04)'
-        : isLoading ? 'rgba(200,255,0,0.02)'
-        : '#0f0f0f',
+      border: isLoading ? '1px solid #c8ff00' : isVerdict ? '1px solid #c8ff00' : '1px solid #1a1a1a',
+      background: isVerdict ? 'rgba(200,255,0,0.04)' : isLoading ? 'rgba(200,255,0,0.02)' : '#0f0f0f',
       marginBottom: '2px',
       opacity: visible ? 1 : 0,
       transform: visible ? 'translateY(0)' : 'translateY(8px)',
@@ -342,12 +361,8 @@ function SectionBlock({ section, content, isActive, visible, loadingWord, isComp
     }}>
       <div style={{
         display: 'flex', alignItems: 'center', padding: '14px 20px',
-        borderBottom: isVerdict ? '1px solid rgba(200,255,0,0.15)'
-          : isLoading ? '1px solid rgba(200,255,0,0.15)'
-          : '1px solid #1a1a1a',
-        background: isVerdict ? 'rgba(200,255,0,0.04)'
-          : isLoading ? 'rgba(200,255,0,0.03)'
-          : '#0c0c0c',
+        borderBottom: isVerdict ? '1px solid rgba(200,255,0,0.15)' : isLoading ? '1px solid rgba(200,255,0,0.15)' : '1px solid #1a1a1a',
+        background: isVerdict ? 'rgba(200,255,0,0.04)' : isLoading ? 'rgba(200,255,0,0.03)' : '#0c0c0c',
       }}>
         <span style={{ fontFamily: 'monospace', fontSize: '10px', color: '#333', letterSpacing: '0.15em', marginRight: '16px' }}>
           {String(section.id).padStart(2, '0')}
@@ -399,9 +414,7 @@ function SectionBlock({ section, content, isActive, visible, loadingWord, isComp
           {cleanLines.map((line, i) => {
             const cl = cleanLine(line)
             if (!cl) return null
-            return (
-              <p key={i} style={{ marginBottom: '10px', color: '#aaa', fontSize: '13px' }}>{cl}</p>
-            )
+            return <p key={i} style={{ marginBottom: '10px', color: '#aaa', fontSize: '13px' }}>{cl}</p>
           })}
         </div>
       ) : (
@@ -468,19 +481,14 @@ export default function Home() {
     }
   }
 
-  const runBatch = async (batch: number, audioInfo: string, q: string, audioFile: File | null) => {
+  const runBatch = async (batch: number, audioInfo: string, q: string) => {
     const batchSections = BATCHES[batch]
 
-    // ── Send as FormData so route.js can forward the file to librosa ──
-    const fd = new FormData()
-    fd.append('audioInfo', audioInfo)
-    fd.append('question', q)
-    fd.append('batch', String(batch))
-    if (audioFile) fd.append('audioFile', audioFile)
-
+    // Plain JSON — no file attached, no payload size issues
     const res = await fetch('/api/analyze', {
       method: 'POST',
-      body: fd,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ audioInfo, question: q, batch }),
     })
 
     if (!res.ok) throw new Error(`Server error: ${res.status}`)
@@ -561,7 +569,11 @@ export default function Home() {
       const metadata = await parseBlob(file)
 
       setLoadingStage('Analyzing audio signal...')
-      const audioFeatures = await extractAudioFeatures(file)
+      // Run client-side Web Audio analysis and browser→Render librosa call in parallel
+      const [audioFeatures, librosaData] = await Promise.all([
+        extractAudioFeatures(file),
+        fetchLibrosaData(file),
+      ])
 
       const audioInfo = `
 Filename: ${file.name}
@@ -576,15 +588,16 @@ Genre: ${metadata.common.genre?.[0] || 'unknown'}
 BPM: ${metadata.common.bpm || 'unknown'}
 Key: ${metadata.common.key || 'unknown'}
 ${audioFeatures}
+${librosaData}
       `.trim()
 
       setLoadingStage('')
       const q = question || 'Give me a full analysis'
 
-      await runBatch(1, audioInfo, q, file)
-      await runBatch(2, audioInfo, q, file)
-      await runBatch(3, audioInfo, q, file)
-      await runBatch(4, audioInfo, q, file)
+      await runBatch(1, audioInfo, q)
+      await runBatch(2, audioInfo, q)
+      await runBatch(3, audioInfo, q)
+      await runBatch(4, audioInfo, q)
 
       setVisibleSections(SECTIONS.map(s => s.id))
       setActiveSection(0)
@@ -607,7 +620,7 @@ ${audioFeatures}
             note: err.message?.includes('fetch') || err.message?.includes('network') || err.message?.includes('Failed to fetch')
               ? 'Likely cause: user navigated away or refreshed mid-analysis'
               : err.message?.includes('timeout') || err.message?.includes('504')
-              ? 'Likely cause: Vercel function timeout — prompt may be too long'
+              ? 'Likely cause: Vercel function timeout'
               : err.message?.includes('50')
               ? 'Likely cause: Server/API error — check Vercel logs'
               : 'Unknown cause — see stack trace',
@@ -625,14 +638,12 @@ ${audioFeatures}
     if (!name || !email) return
     setSubmitting(true)
     setError(null)
-
     try {
       const res = await fetch('/api/send-report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, email, filename, report: rawReportRef.current })
       })
-
       const data = await res.json()
       if (!res.ok) throw new Error(data?.error || 'Failed to send report.')
       setSubmitted(true)
@@ -820,7 +831,6 @@ ${audioFeatures}
                 >
                   {submitting ? 'Sending...' : 'Send me this report'}
                 </button>
-
                 {error && (
                   <div style={{ marginTop: '12px', background: '#1a0000', border: '1px solid #440000', borderRadius: '10px', padding: '12px 16px' }}>
                     <p style={{ color: '#ff6666', fontSize: '12px' }}>{error}</p>
