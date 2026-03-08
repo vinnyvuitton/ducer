@@ -482,49 +482,13 @@ export default function Home() {
   }
 
   // Slice first 10s of audio and base64 encode it for AudD fingerprinting
+  // Fast: slice first 400KB of raw file — AudD accepts any audio format
   const getAudioBase64Snippet = async (f: File): Promise<string | null> => {
     try {
-      const arrayBuffer = await f.arrayBuffer()
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)()
-      const decoded = await audioCtx.decodeAudioData(arrayBuffer)
-      await audioCtx.close()
-
-      const snippetDuration = Math.min(10, decoded.duration)
-      const sampleRate = decoded.sampleRate
-      const snippetSamples = Math.floor(snippetDuration * sampleRate)
-      const offlineCtx = new OfflineAudioContext(1, snippetSamples, sampleRate)
-      const source = offlineCtx.createBufferSource()
-      source.buffer = decoded
-      source.connect(offlineCtx.destination)
-      source.start(0)
-      const rendered = await offlineCtx.startRendering()
-
-      // Convert rendered PCM to WAV bytes then base64
-      const numSamples = rendered.length
-      const pcmData = rendered.getChannelData(0)
-      const wavBuffer = new ArrayBuffer(44 + numSamples * 2)
-      const view = new DataView(wavBuffer)
-      const writeStr = (offset: number, str: string) => {
-        for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i))
-      }
-      writeStr(0, 'RIFF')
-      view.setUint32(4, 36 + numSamples * 2, true)
-      writeStr(8, 'WAVE')
-      writeStr(12, 'fmt ')
-      view.setUint32(16, 16, true)
-      view.setUint16(20, 1, true)
-      view.setUint16(22, 1, true)
-      view.setUint32(24, sampleRate, true)
-      view.setUint32(28, sampleRate * 2, true)
-      view.setUint16(32, 2, true)
-      view.setUint16(34, 16, true)
-      writeStr(36, 'data')
-      view.setUint32(40, numSamples * 2, true)
-      for (let i = 0; i < numSamples; i++) {
-        const s = Math.max(-1, Math.min(1, pcmData[i]))
-        view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true)
-      }
-      const bytes = new Uint8Array(wavBuffer)
+      const sliceSize = Math.min(f.size, 400 * 1024)
+      const slice = f.slice(0, sliceSize)
+      const arrayBuffer = await slice.arrayBuffer()
+      const bytes = new Uint8Array(arrayBuffer)
       let binary = ''
       for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
       return btoa(binary)
@@ -816,7 +780,7 @@ ${librosaData}
 
   return (
     <main style={{ minHeight: '100vh', background: '#080808', color: '#e8e8e8', fontFamily: 'sans-serif' }}>
-      <style>{`@keyframes pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }`}</style>
+      <style>{`@keyframes pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } } @keyframes shimmer { 0% { background-position: 200% center; } 100% { background-position: -200% center; } }`}</style>
 
       <div style={{
         borderBottom: '1px solid #1a1a1a', padding: '24px 40px 20px',
@@ -842,6 +806,23 @@ ${librosaData}
       </div>
 
       <div style={{ maxWidth: '960px', margin: '0 auto', padding: '40px' }}>
+        {loading && visibleSections.length === 0 && (
+          <div style={{ padding: '60px 0', textAlign: 'center' }}>
+            <p style={{
+              fontFamily: 'monospace', fontSize: '10px', letterSpacing: '0.25em',
+              textTransform: 'uppercase',
+              background: 'linear-gradient(90deg, #333 25%, #c8ff00 50%, #333 75%)',
+              backgroundSize: '200% auto',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              backgroundClip: 'text',
+              animation: 'shimmer 2s linear infinite',
+              display: 'inline-block',
+            }}>
+              Reading your track...
+            </p>
+          </div>
+        )}
         {SECTIONS.map(section => (
           <SectionBlock
             key={section.id}
