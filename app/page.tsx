@@ -591,7 +591,7 @@ ${audioFeatures}
 ${librosaData}
       `.trim()
 
-      setLoadingStage('')
+      setLoadingStage('Building your report...')
       const q = question || 'Give me a full analysis'
 
       await runBatch(1, audioInfo, q)
