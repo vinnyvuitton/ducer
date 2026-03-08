@@ -512,11 +512,11 @@ export default function Home() {
       }
     }
 
-    // Stream fully done — parse all sections, shoot bars to 100%, then reveal content
+    // Stream fully done — shoot bars to 100%, wait, then set content + complete atomically
     const finalParsed = parseReport(batchText, batchSections)
-    setSectionContents(prev => ({ ...prev, ...finalParsed }))
     setCompletingSections(prev => [...prev, ...batchSections])
     await new Promise(r => setTimeout(r, 450))
+    setSectionContents(prev => ({ ...prev, ...finalParsed }))
     setCompletedSections(prev => {
       const next = [...prev]
       batchSections.forEach(id => { if (!next.includes(id)) next.push(id) })
