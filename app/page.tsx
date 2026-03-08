@@ -476,6 +476,17 @@ export default function Home() {
     return word
   }
 
+  // Warn user if they try to refresh/close while analysis is running
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!loading) return
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [loading])
+
   const handleFile = (f: File | null | undefined) => {
     if (f && f.type.startsWith('audio/')) {
       setFile(f)
@@ -611,29 +622,43 @@ ${audioFeatures}
       setLoadingStage('')
       const q = question || 'Give me a full analysis'
 
-      for (let i = 1; i <= 12; i++) {
-        await runSection(i, audioInfo, q)
-      }
+      await runBatch(1, audioInfo, q)
+      await runBatch(2, audioInfo, q)
+      await runBatch(3, audioInfo, q)
+      await runBatch(4, audioInfo, q)
 
       setVisibleSections(SECTIONS.map(s => s.id))
       setActiveSection(0)
       setDone(true)
     } catch (err: any) {
-      setError(err.message || 'Something went wrong. Please try again.')
-      // Report error to Vinny via the alert endpoint
+      // Alert Vinny with full context but don't interrupt the user
       try {
         await fetch('/api/alert-error', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             message: err.message || 'Unknown error',
+            errorType: err.name || 'Error',
+            stack: err.stack || 'No stack available',
             filename: filename || 'unknown',
+            activeSection: activeSection || 0,
+            sectionsCompleted: completedSections.length,
+            sectionsVisible: visibleSections.length,
+            userAgent: navigator.userAgent,
             timestamp: new Date().toISOString(),
+            note: err.message?.includes('fetch') || err.message?.includes('network') || err.message?.includes('Failed to fetch')
+              ? 'Likely cause: user navigated away or refreshed mid-analysis'
+              : err.message?.includes('timeout') || err.message?.includes('504')
+              ? 'Likely cause: Vercel function timeout — prompt may be too long'
+              : err.message?.includes('50')
+              ? 'Likely cause: Server/API error — check Vercel logs'
+              : 'Unknown cause — see stack trace',
           })
         })
       } catch (_) {
-        // silently fail — don't surface alert errors to user
+        // silently fail
       }
+      setError(err.message || 'Something went wrong. Please try again.')
     }
 
     setLoading(false)
