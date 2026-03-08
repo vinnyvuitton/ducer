@@ -5,6 +5,7 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID || null
 const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET || null
 const AUDD_API_TOKEN = process.env.AUDD_API_TOKEN || null
+const GENIUS_ACCESS_TOKEN = process.env.GENIUS_ACCESS_TOKEN || null
 
 // ─── AudD: fingerprint audio file to identify track ───────────────────────────
 async function getAuddData(audioUrl) {
@@ -193,12 +194,56 @@ ${featuresBlock}
 }
 
 // ─── Build enriched audioInfo ──────────────────────────────────────────────────
-function buildEnrichedAudioInfo(baseAudioInfo, auddResult, spotifyData) {
+// ─── Genius: search for song metadata + pageviews ─────────────────────────────
+async function getGeniusData(title, artist) {
+  if (!GENIUS_ACCESS_TOKEN || !title || title === 'unknown') return null
+  try {
+    const query = artist && artist !== 'unknown' ? `${title} ${artist}` : title
+    const searchRes = await fetch(
+      `https://api.genius.com/search?q=${encodeURIComponent(query)}`,
+      { headers: { Authorization: `Bearer ${GENIUS_ACCESS_TOKEN}` } }
+    )
+    if (!searchRes.ok) return null
+    const searchData = await searchRes.json()
+    const hit = searchData?.response?.hits?.[0]?.result
+    if (!hit) return null
+    return {
+      title: hit.title ?? 'unknown',
+      artist: hit.primary_artist?.name ?? 'unknown',
+      url: hit.url ?? '',
+      releaseDate: hit.release_date_for_display ?? 'unknown',
+      pageviews: hit.stats?.pageviews ?? null,
+      hot: hit.stats?.hot ?? false,
+    }
+  } catch {
+    return null
+  }
+}
+
+// ─── Build Genius enrichment string ───────────────────────────────────────────
+function buildGeniusEnrichment(geniusData) {
+  if (!geniusData) return ''
+  const pageviewsStr = geniusData.pageviews
+    ? geniusData.pageviews.toLocaleString() + ' Genius pageviews'
+    : 'pageview data unavailable'
+  return `
+--- GENIUS DATA (lyric engagement + cultural resonance) ---
+Genius Match: ${geniusData.title} by ${geniusData.artist}
+Release Date: ${geniusData.releaseDate}
+Lyric Engagement: ${pageviewsStr}${geniusData.hot ? ' — currently TRENDING on Genius' : ''}
+Genius URL: ${geniusData.url}
+Note: Genius pageview count is a direct proxy for lyric curiosity and cultural resonance — high pageviews signal the writing is driving active audience engagement beyond passive listening.
+---`
+}
+
+function buildEnrichedAudioInfo(baseAudioInfo, auddResult, spotifyData, geniusData) {
   let enriched = baseAudioInfo
   const auddBlock = buildAuddEnrichment(auddResult)
   if (auddBlock) enriched += auddBlock
   const spotifyBlock = buildSpotifyEnrichment(spotifyData)
   if (spotifyBlock) enriched += spotifyBlock
+  const geniusBlock = buildGeniusEnrichment(geniusData)
+  if (geniusBlock) enriched += geniusBlock
   return enriched
 }
 
@@ -272,6 +317,7 @@ Analyze lyric function directly. Answer all 8 questions:
 6. Would it work without the performer's delivery?
 7. What is the cliche risk?
 8. What would a top-tier writer tighten first?
+If Genius data is present, reference the pageview count as evidence of lyric cultural resonance — high pageviews mean listeners are actively seeking out the words, which is a strong signal. If trending on Genius, flag that explicitly.
 If lyrics are unavailable from metadata, state that clearly and assess based on genre, title, and structure.
 
 ## 8. LANE CLASSIFICATION
@@ -370,7 +416,10 @@ export async function POST(request) {
     // Spotify lookup using best available title/artist
     const spotifyData = await getSpotifyData(title, artist)
 
-    const enrichedAudio = buildEnrichedAudioInfo(audioInfo, auddResult, spotifyData)
+    // Genius lookup for lyric engagement data
+    const geniusData = await getGeniusData(title, artist)
+
+    const enrichedAudio = buildEnrichedAudioInfo(audioInfo, auddResult, spotifyData, geniusData)
 
     const prompt = promptTemplate
       .replace('{audioInfo}', enrichedAudio)
