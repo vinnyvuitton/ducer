@@ -416,13 +416,12 @@ function SectionBlock({ section, content, isActive, visible, loadingWord, isComp
           {cleanLines.map((line, i) => {
             const cl = cleanLine(line)
             if (!cl) return null
-            const isWarning = cl.includes('⚠') || cl.toLowerCase().includes('flag') || cl.toLowerCase().includes('warning')
+
             return (
               <p key={i} style={{
                 marginBottom: '10px',
-                color: isWarning ? '#ff8c00' : '#aaa',
-                fontFamily: isWarning ? 'monospace' : 'inherit',
-                fontSize: isWarning ? '11px' : '13px',
+                color: '#aaa',
+                fontSize: '13px',
               }}>{cl}</p>
             )
           })}
