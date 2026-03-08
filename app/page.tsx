@@ -490,7 +490,6 @@ export default function Home() {
     const decoder = new TextDecoder()
     let batchText = ''
     let shownSections: number[] = []
-    let prevSection: number | null = null
 
     while (true) {
       const { done: streamDone, value } = await reader.read()
@@ -499,7 +498,8 @@ export default function Home() {
       batchText += chunk
       rawReportRef.current += chunk
 
-      // Reveal each section the moment its header appears in the stream
+      // During streaming: only show section boxes + update active loading bar
+      // Never reveal content mid-stream — wait for full batch to finish
       for (const id of batchSections) {
         if (!shownSections.includes(id)) {
           const regex = new RegExp(`##\\s*${id}[.\\s]`)
@@ -507,30 +507,16 @@ export default function Home() {
             shownSections = [...shownSections, id]
             setVisibleSections(prev => prev.includes(id) ? prev : [...prev, id])
             setActiveSection(id)
-
-            // When a NEW section starts, the PREVIOUS section is done streaming
-            // Complete the previous one: shoot bar to 100%, parse it, reveal text
-            if (prevSection !== null) {
-              const prevId = prevSection
-              const parsed = parseReport(batchText, [prevId])
-              setSectionContents(prev => ({ ...prev, ...parsed }))
-              setCompletingSections(prev => [...prev, prevId])
-              setTimeout(() => {
-                setCompletedSections(prev => [...prev, prevId])
-                setCompletingSections(prev => prev.filter(i => i !== prevId))
-              }, 400)
-            }
-            prevSection = id
           }
         }
       }
     }
 
-    // Stream fully done — complete the last section (and any stragglers)
+    // Stream fully done — parse all sections, shoot bars to 100%, then reveal content
     const finalParsed = parseReport(batchText, batchSections)
     setSectionContents(prev => ({ ...prev, ...finalParsed }))
     setCompletingSections(prev => [...prev, ...batchSections])
-    await new Promise(r => setTimeout(r, 400))
+    await new Promise(r => setTimeout(r, 450))
     setCompletedSections(prev => {
       const next = [...prev]
       batchSections.forEach(id => { if (!next.includes(id)) next.push(id) })
