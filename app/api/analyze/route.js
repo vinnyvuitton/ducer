@@ -2,9 +2,82 @@ import Anthropic from '@anthropic-ai/sdk'
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
-const AUDIO_SERVICE_URL = process.env.AUDIO_SERVICE_URL || null
 const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID || null
 const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET || null
+const AUDD_API_TOKEN = process.env.AUDD_API_TOKEN || null
+
+// ─── AudD: fingerprint audio file to identify track ───────────────────────────
+async function getAuddData(audioUrl) {
+  if (!AUDD_API_TOKEN || !audioUrl) return null
+  try {
+    const body = new URLSearchParams({
+      url: audioUrl,
+      return: 'spotify,apple_music,deezer',
+      api_token: AUDD_API_TOKEN,
+    })
+    const res = await fetch('https://api.audd.io/', {
+      method: 'POST',
+      body,
+      signal: AbortSignal.timeout(8000),
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    if (data.status !== 'success' || !data.result) return null
+    return data.result
+  } catch {
+    return null
+  }
+}
+
+// ─── AudD: identify from base64 audio blob ────────────────────────────────────
+async function getAuddDataFromBase64(base64Audio) {
+  if (!AUDD_API_TOKEN || !base64Audio) return null
+  try {
+    const body = new URLSearchParams({
+      audio: base64Audio,
+      return: 'spotify,apple_music,deezer',
+      api_token: AUDD_API_TOKEN,
+    })
+    const res = await fetch('https://api.audd.io/', {
+      method: 'POST',
+      body,
+      signal: AbortSignal.timeout(12000),
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    if (data.status !== 'success' || !data.result) return null
+    return data.result
+  } catch {
+    return null
+  }
+}
+
+// ─── Build AudD enrichment string ─────────────────────────────────────────────
+function buildAuddEnrichment(auddResult) {
+  if (!auddResult) return ''
+
+  const title = auddResult.title ?? 'unknown'
+  const artist = auddResult.artist ?? 'unknown'
+  const album = auddResult.album ?? 'unknown'
+  const releaseDate = auddResult.release_date ?? 'unknown'
+  const label = auddResult.label ?? 'unknown'
+  const timecode = auddResult.timecode ?? 'unknown'
+
+  const spotifyLink = auddResult.spotify?.external_urls?.spotify ?? ''
+  const appleMusicLink = auddResult.apple_music?.url ?? ''
+
+  return `
+--- AUDD AUDIO FINGERPRINT (track identified from audio content) ---
+Identified Title: ${title}
+Identified Artist: ${artist}
+Album: ${album}
+Release Date: ${releaseDate}
+Label: ${label}
+Match Timecode: ${timecode}
+Spotify Link: ${spotifyLink || 'not found'}
+Apple Music Link: ${appleMusicLink || 'not found'}
+---`
+}
 
 // ─── Spotify: get access token ────────────────────────────────────────────────
 async function getSpotifyToken() {
@@ -120,8 +193,10 @@ ${featuresBlock}
 }
 
 // ─── Build enriched audioInfo ──────────────────────────────────────────────────
-function buildEnrichedAudioInfo(baseAudioInfo, spotifyData) {
+function buildEnrichedAudioInfo(baseAudioInfo, auddResult, spotifyData) {
   let enriched = baseAudioInfo
+  const auddBlock = buildAuddEnrichment(auddResult)
+  if (auddBlock) enriched += auddBlock
   const spotifyBlock = buildSpotifyEnrichment(spotifyData)
   if (spotifyBlock) enriched += spotifyBlock
   return enriched
@@ -138,6 +213,7 @@ CORE DOCTRINE:
 - Never hallucinate missing data. If BPM, key, or genre are unknown, say so explicitly and reason from what IS available.
 - Separate file truth from song truth. A low-bitrate upload can still teach arrangement lessons while limiting mastering conclusions.
 - Judge by lane function. A death metal track is not penalized for not behaving like synth-pop. Evaluate whether the song succeeds in its own lane first.
+- If AudD fingerprint data is present, use the identified title, artist, label, and release date to ground the Song Identity section with confirmed facts.
 - If Spotify data is present, use it to ground claims about genre, popularity, and artist positioning. Reference the Spotify popularity score and artist follower count when discussing market standing.
 
 AUDIO DATA:
@@ -148,7 +224,7 @@ ARTIST GOAL: {question}
 Produce sections 1–4. Every section is mandatory. Use exactly these headers:
 
 ## 1. SONG IDENTITY
-State what this song is based on all available data. Artist, title, format, duration. If Spotify data is present, reference the release date, album context, and Spotify popularity score. Note source quality flags (low bitrate, lossy conversion, mono, missing tags). If data is missing, say what is missing and what that limits.
+State what this song is based on all available data. Artist, title, format, duration. If AudD fingerprint data is present, confirm the identification and note the label and release date. If Spotify data is present, reference the album context and Spotify popularity score. Note source quality flags (low bitrate, lossy conversion, mono, missing tags). If data is missing, say what is missing and what that limits.
 
 ## 2. FILE HEALTH & TECHNICAL SNAPSHOT
 Assess the technical state directly. Cover: format and bitrate quality judgment (release-ready, demo quality, or compromised?), sample rate, channel configuration, duration. Reference the RMS loudness and crest factor. If Spotify loudness data is present, compare it to the file's measured loudness. Spotify/YouTube normalize to -14 LUFS integrated, Apple Music to -16 LUFS — use this context when assessing loudness. Be direct. If the file has problems, name them.
@@ -269,23 +345,32 @@ Produce section 12. Use exactly this header:
 export async function POST(request) {
   try {
     const body = await request.json()
-    const { audioInfo, question, batch } = body
+    const { audioInfo, question, batch, audioBase64 } = body
 
     const promptTemplate = BATCH_PROMPTS[batch]
     if (!promptTemplate) {
       return Response.json({ error: 'Invalid batch' }, { status: 400 })
     }
 
-    // Extract title and artist from audioInfo for Spotify lookup
+    // Extract title and artist from audioInfo (from ID3 tags or prior AudD result)
     const titleMatch = audioInfo.match(/Title:\s*(.+)/i)
     const artistMatch = audioInfo.match(/Artist:\s*(.+)/i)
-    const title = titleMatch?.[1]?.trim()
-    const artist = artistMatch?.[1]?.trim()
+    let title = titleMatch?.[1]?.trim()
+    let artist = artistMatch?.[1]?.trim()
 
-    // Fetch Spotify data (gracefully degrades if unavailable or track not found)
+    // Only run AudD on batch 1 (no need to fingerprint 4 times)
+    let auddResult = null
+    if (batch === 1 && audioBase64) {
+      auddResult = await getAuddDataFromBase64(audioBase64)
+      // If AudD identified the track, prefer its title/artist for Spotify lookup
+      if (auddResult?.title) title = auddResult.title
+      if (auddResult?.artist) artist = auddResult.artist
+    }
+
+    // Spotify lookup using best available title/artist
     const spotifyData = await getSpotifyData(title, artist)
 
-    const enrichedAudio = buildEnrichedAudioInfo(audioInfo, spotifyData)
+    const enrichedAudio = buildEnrichedAudioInfo(audioInfo, auddResult, spotifyData)
 
     const prompt = promptTemplate
       .replace('{audioInfo}', enrichedAudio)

@@ -74,7 +74,7 @@ async function fetchLibrosaData(file: File): Promise<string> {
     const res = await fetch(`${audioServiceUrl}/analyze`, {
       method: 'POST',
       body: fd,
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(60000),
     })
     if (!res.ok) return ''
     const data = await res.json()
@@ -110,50 +110,108 @@ async function extractAudioFeatures(file: File): Promise<string> {
   const audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
 
   const numChannels = audioBuffer.numberOfChannels
+  const sampleRate = audioBuffer.sampleRate
   const totalSamples = audioBuffer.length
 
   const leftChannel = audioBuffer.getChannelData(0)
   const rightChannel = numChannels > 1 ? audioBuffer.getChannelData(1) : null
 
-  // Sample every 4th sample for speed — accurate enough for RMS/peak
-  let sumSquaresL = 0, sumSquaresR = 0, peakL = 0, peakR = 0, sumL = 0
-  let dotProduct = 0, magL = 0, magR = 0
-
-  for (let i = 0; i < totalSamples; i += 4) {
-    const l = leftChannel[i]
-    const r = rightChannel ? rightChannel[i] : l
-    sumSquaresL += l * l
-    sumSquaresR += r * r
-    sumL += l
-    if (Math.abs(l) > peakL) peakL = Math.abs(l)
-    if (Math.abs(r) > peakR) peakR = Math.abs(r)
-    dotProduct += l * r
-    magL += l * l
-    magR += r * r
+  let sumSquaresL = 0
+  let sumSquaresR = 0
+  for (let i = 0; i < totalSamples; i++) {
+    sumSquaresL += leftChannel[i] * leftChannel[i]
+    if (rightChannel) sumSquaresR += rightChannel[i] * rightChannel[i]
   }
-
-  const samples = Math.ceil(totalSamples / 4)
-  const rmsL = Math.sqrt(sumSquaresL / samples)
-  const rmsR = Math.sqrt(sumSquaresR / samples)
+  const rmsL = Math.sqrt(sumSquaresL / totalSamples)
+  const rmsR = rightChannel ? Math.sqrt(sumSquaresR / totalSamples) : rmsL
   const rmsAvg = (rmsL + rmsR) / 2
   const rmsDb = 20 * Math.log10(rmsAvg || 0.000001)
 
+  let peakL = 0
+  let peakR = 0
+  for (let i = 0; i < totalSamples; i++) {
+    const absL = Math.abs(leftChannel[i])
+    if (absL > peakL) peakL = absL
+    if (rightChannel) {
+      const absR = Math.abs(rightChannel[i])
+      if (absR > peakR) peakR = absR
+    }
+  }
   const peakAvg = rightChannel ? (peakL + peakR) / 2 : peakL
   const peakDb = 20 * Math.log10(peakAvg || 0.000001)
   const crestFactor = peakDb - rmsDb
 
-  const dcOffset = Math.abs(sumL / samples)
-
   let clippedSamples = 0
-  for (let i = 0; i < totalSamples; i += 4) {
+  for (let i = 0; i < totalSamples; i++) {
     if (Math.abs(leftChannel[i]) >= 0.99) clippedSamples++
     if (rightChannel && Math.abs(rightChannel[i]) >= 0.99) clippedSamples++
   }
-  const clippingPercent = ((clippedSamples / (samples * (rightChannel ? 2 : 1))) * 100).toFixed(3)
+  const clippingPercent = ((clippedSamples / (totalSamples * (rightChannel ? 2 : 1))) * 100).toFixed(3)
 
-  const correlation = rightChannel
-    ? dotProduct / (Math.sqrt(magL) * Math.sqrt(magR) || 1)
-    : 1
+  let sumL = 0
+  for (let i = 0; i < totalSamples; i++) sumL += leftChannel[i]
+  const dcOffset = Math.abs(sumL / totalSamples)
+
+  let correlation = 0
+  if (rightChannel) {
+    let dotProduct = 0
+    let magL = 0
+    let magR = 0
+    for (let i = 0; i < totalSamples; i += 4) {
+      dotProduct += leftChannel[i] * rightChannel[i]
+      magL += leftChannel[i] * leftChannel[i]
+      magR += rightChannel[i] * rightChannel[i]
+    }
+    correlation = dotProduct / (Math.sqrt(magL) * Math.sqrt(magR) || 1)
+  } else {
+    correlation = 1
+  }
+
+  const bands = {
+    sub: { low: 0, high: 80, energy: 0 },
+    lowMid: { low: 80, high: 300, energy: 0 },
+    mid: { low: 300, high: 2000, energy: 0 },
+    high: { low: 2000, high: 8000, energy: 0 },
+    air: { low: 8000, high: sampleRate / 2, energy: 0 },
+  }
+
+  const bandResults: Record<string, number> = {}
+  for (const [bandName, band] of Object.entries(bands)) {
+    if (band.high > sampleRate / 2) { bandResults[bandName] = 0; continue }
+    try {
+      const bandCtx = new OfflineAudioContext(1, Math.min(totalSamples, sampleRate * 5), sampleRate)
+      const bandSource = bandCtx.createBufferSource()
+      const sampleCount = Math.min(totalSamples, sampleRate * 5)
+      const bandBuffer = bandCtx.createBuffer(1, sampleCount, sampleRate)
+      const bandData = bandBuffer.getChannelData(0)
+      const bandStart = Math.floor(totalSamples * 0.2)
+      for (let i = 0; i < sampleCount; i++) {
+        bandData[i] = leftChannel[bandStart + i] || 0
+        if (rightChannel) bandData[i] = (bandData[i] + (rightChannel[bandStart + i] || 0)) / 2
+      }
+      bandSource.buffer = bandBuffer
+      const filter = bandCtx.createBiquadFilter()
+      if (band.low === 0) { filter.type = 'lowpass'; filter.frequency.value = band.high }
+      else if (band.high >= sampleRate / 2) { filter.type = 'highpass'; filter.frequency.value = band.low }
+      else { filter.type = 'bandpass'; filter.frequency.value = (band.low + band.high) / 2; filter.Q.value = (band.low + band.high) / (2 * (band.high - band.low)) }
+      bandSource.connect(filter)
+      filter.connect(bandCtx.destination)
+      bandSource.start()
+      const rendered = await bandCtx.startRendering()
+      const renderedData = rendered.getChannelData(0)
+      let sumSq = 0
+      for (let i = 0; i < renderedData.length; i++) sumSq += renderedData[i] * renderedData[i]
+      bandResults[bandName] = Math.sqrt(sumSq / renderedData.length)
+    } catch { bandResults[bandName] = 0 }
+  }
+
+  const totalBandEnergy = Object.values(bandResults).reduce((a, b) => a + b, 0) || 1
+  const bandPercents: Record<string, string> = {}
+  for (const [k, v] of Object.entries(bandResults)) {
+    bandPercents[k] = ((v / totalBandEnergy) * 100).toFixed(1)
+  }
+
+  await audioContext.close()
 
   let stereoDesc = 'mono'
   if (rightChannel) {
@@ -164,8 +222,6 @@ async function extractAudioFeatures(file: File): Promise<string> {
     else stereoDesc = 'very wide / possible phase issues'
   }
 
-  await audioContext.close()
-
   return `
 --- AUDIO SIGNAL ANALYSIS (client-side) ---
 RMS Loudness: ${rmsDb.toFixed(1)} dBFS
@@ -175,7 +231,13 @@ Estimated Clipping: ${clippingPercent}% of samples at/near 0dBFS
 DC Offset: ${dcOffset.toFixed(5)} ${dcOffset > 0.01 ? '(FLAGGED — above threshold)' : '(clean)'}
 Stereo Correlation: ${correlation.toFixed(3)} — ${stereoDesc}
 Channels: ${numChannels === 1 ? 'Mono' : 'Stereo'}
-Note: Band energy analysis provided by librosa service when available.
+
+Frequency Band Energy (relative):
+  Sub bass (0-80 Hz):      ${bandPercents.sub}%
+  Low-mid (80-300 Hz):     ${bandPercents.lowMid}%
+  Mids (300 Hz-2 kHz):     ${bandPercents.mid}%
+  High (2-8 kHz):          ${bandPercents.high}%
+  Air (8 kHz+):            ${bandPercents.air}%
 ---`
 }
 
@@ -416,22 +478,68 @@ export default function Home() {
     if (f && f.type.startsWith('audio/')) {
       setFile(f)
       setFilename(f.name)
-      // Wake Render service on file drop — fire and forget
-      const audioServiceUrl = process.env.NEXT_PUBLIC_AUDIO_SERVICE_URL
-      if (audioServiceUrl) {
-        fetch(`${audioServiceUrl}/health`).catch(() => {})
-      }
     }
   }
 
-  const runBatch = async (batch: number, audioInfo: string, q: string) => {
+  // Slice first 10s of audio and base64 encode it for AudD fingerprinting
+  const getAudioBase64Snippet = async (f: File): Promise<string | null> => {
+    try {
+      const arrayBuffer = await f.arrayBuffer()
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)()
+      const decoded = await audioCtx.decodeAudioData(arrayBuffer)
+      await audioCtx.close()
+
+      const snippetDuration = Math.min(10, decoded.duration)
+      const sampleRate = decoded.sampleRate
+      const snippetSamples = Math.floor(snippetDuration * sampleRate)
+      const offlineCtx = new OfflineAudioContext(1, snippetSamples, sampleRate)
+      const source = offlineCtx.createBufferSource()
+      source.buffer = decoded
+      source.connect(offlineCtx.destination)
+      source.start(0)
+      const rendered = await offlineCtx.startRendering()
+
+      // Convert rendered PCM to WAV bytes then base64
+      const numSamples = rendered.length
+      const pcmData = rendered.getChannelData(0)
+      const wavBuffer = new ArrayBuffer(44 + numSamples * 2)
+      const view = new DataView(wavBuffer)
+      const writeStr = (offset: number, str: string) => {
+        for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i))
+      }
+      writeStr(0, 'RIFF')
+      view.setUint32(4, 36 + numSamples * 2, true)
+      writeStr(8, 'WAVE')
+      writeStr(12, 'fmt ')
+      view.setUint32(16, 16, true)
+      view.setUint16(20, 1, true)
+      view.setUint16(22, 1, true)
+      view.setUint32(24, sampleRate, true)
+      view.setUint32(28, sampleRate * 2, true)
+      view.setUint16(32, 2, true)
+      view.setUint16(34, 16, true)
+      writeStr(36, 'data')
+      view.setUint32(40, numSamples * 2, true)
+      for (let i = 0; i < numSamples; i++) {
+        const s = Math.max(-1, Math.min(1, pcmData[i]))
+        view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true)
+      }
+      const bytes = new Uint8Array(wavBuffer)
+      let binary = ''
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
+      return btoa(binary)
+    } catch {
+      return null
+    }
+  }
+
+  const runBatch = async (batch: number, audioInfo: string, q: string, audioBase64?: string | null) => {
     const batchSections = BATCHES[batch]
 
-    // Plain JSON — no file attached, no payload size issues
     const res = await fetch('/api/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ audioInfo, question: q, batch }),
+      body: JSON.stringify({ audioInfo, question: q, batch, audioBase64: batch === 1 ? (audioBase64 ?? null) : null }),
     })
 
     if (!res.ok) throw new Error(`Server error: ${res.status}`)
@@ -512,13 +620,10 @@ export default function Home() {
       const metadata = await parseBlob(file)
 
       setLoadingStage('Analyzing audio signal...')
-      // Run Web Audio analysis immediately — fire Render call with short race
+      // Run client-side Web Audio analysis and browser→Render librosa call in parallel
       const [audioFeatures, librosaData] = await Promise.all([
         extractAudioFeatures(file),
-        Promise.race([
-          fetchLibrosaData(file),
-          new Promise<string>(resolve => setTimeout(() => resolve(''), 3000))
-        ])
+        fetchLibrosaData(file),
       ])
 
       const audioInfo = `
@@ -537,10 +642,13 @@ ${audioFeatures}
 ${librosaData}
       `.trim()
 
-      setLoadingStage('Building your report...')
+      setLoadingStage('')
       const q = question || 'Give me a full analysis'
 
-      await runBatch(1, audioInfo, q)
+      // Generate short audio snippet for AudD fingerprinting (batch 1 only)
+      const audioBase64 = await getAudioBase64Snippet(file)
+
+      await runBatch(1, audioInfo, q, audioBase64)
       await runBatch(2, audioInfo, q)
       await runBatch(3, audioInfo, q)
       await runBatch(4, audioInfo, q)
@@ -708,7 +816,7 @@ ${librosaData}
 
   return (
     <main style={{ minHeight: '100vh', background: '#080808', color: '#e8e8e8', fontFamily: 'sans-serif' }}>
-      <style>{`@keyframes pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } } @keyframes shimmer { 0% { background-position: 200% center; } 100% { background-position: -200% center; } }`}</style>
+      <style>{`@keyframes pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }`}</style>
 
       <div style={{
         borderBottom: '1px solid #1a1a1a', padding: '24px 40px 20px',
@@ -734,23 +842,6 @@ ${librosaData}
       </div>
 
       <div style={{ maxWidth: '960px', margin: '0 auto', padding: '40px' }}>
-        {loading && visibleSections.length === 0 && (
-          <div style={{ padding: '60px 0', textAlign: 'center' }}>
-            <p style={{
-              fontFamily: 'monospace', fontSize: '10px', letterSpacing: '0.25em',
-              textTransform: 'uppercase',
-              background: 'linear-gradient(90deg, #333 25%, #c8ff00 50%, #333 75%)',
-              backgroundSize: '200% auto',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              backgroundClip: 'text',
-              animation: 'shimmer 2s linear infinite',
-            }}>
-              Reading your track...
-            </p>
-          </div>
-        )}
-
         {SECTIONS.map(section => (
           <SectionBlock
             key={section.id}
