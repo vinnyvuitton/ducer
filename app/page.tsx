@@ -734,6 +734,14 @@ ${librosaData}
       </div>
 
       <div style={{ maxWidth: '960px', margin: '0 auto', padding: '40px' }}>
+        {loading && visibleSections.length === 0 && (
+          <div style={{ padding: '60px 0', textAlign: 'center' }}>
+            <p style={{ fontFamily: 'monospace', fontSize: '10px', color: '#333', letterSpacing: '0.25em', textTransform: 'uppercase' }}>
+              Reading your track...
+            </p>
+          </div>
+        )}
+
         {SECTIONS.map(section => (
           <SectionBlock
             key={section.id}
