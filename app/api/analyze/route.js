@@ -2,6 +2,132 @@ import Anthropic from '@anthropic-ai/sdk'
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
+const AUDIO_SERVICE_URL = process.env.AUDIO_SERVICE_URL || null
+const SPOTIFY_CLIENT_ID = process.env.SPOTIFY_CLIENT_ID || null
+const SPOTIFY_CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET || null
+
+// ─── Spotify: get access token ────────────────────────────────────────────────
+async function getSpotifyToken() {
+  if (!SPOTIFY_CLIENT_ID || !SPOTIFY_CLIENT_SECRET) return null
+  try {
+    const res = await fetch('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: 'Basic ' + Buffer.from(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`).toString('base64'),
+      },
+      body: 'grant_type=client_credentials',
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    return data.access_token || null
+  } catch {
+    return null
+  }
+}
+
+// ─── Spotify: search for track and get audio features ─────────────────────────
+async function getSpotifyData(title, artist) {
+  if (!title || title === 'unknown') return null
+
+  const token = await getSpotifyToken()
+  if (!token) return null
+
+  try {
+    const query = artist && artist !== 'unknown'
+      ? `track:${title} artist:${artist}`
+      : `track:${title}`
+
+    const searchRes = await fetch(
+      `https://api.spotify.com/v1/search?q=${encodeURIComponent(query)}&type=track&limit=1`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    )
+    if (!searchRes.ok) return null
+    const searchData = await searchRes.json()
+
+    const track = searchData?.tracks?.items?.[0]
+    if (!track) return null
+
+    const featuresRes = await fetch(
+      `https://api.spotify.com/v1/audio-features/${track.id}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    )
+    const features = featuresRes.ok ? await featuresRes.json() : null
+
+    const artistId = track.artists?.[0]?.id
+    let artistData = null
+    if (artistId) {
+      const artistRes = await fetch(
+        `https://api.spotify.com/v1/artists/${artistId}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
+      artistData = artistRes.ok ? await artistRes.json() : null
+    }
+
+    return { track, features, artistData }
+  } catch {
+    return null
+  }
+}
+
+// ─── Build Spotify enrichment string ──────────────────────────────────────────
+function buildSpotifyEnrichment(spotifyData) {
+  if (!spotifyData) return ''
+
+  const { track, features, artistData } = spotifyData
+
+  const popularity = track.popularity ?? 'unknown'
+  const releaseDate = track.album?.release_date ?? 'unknown'
+  const albumName = track.album?.name ?? 'unknown'
+  const albumType = track.album?.album_type ?? 'unknown'
+  const artistName = track.artists?.map(a => a.name).join(', ') ?? 'unknown'
+  const genres = artistData?.genres?.slice(0, 5).join(', ') || 'unknown'
+  const artistFollowers = artistData?.followers?.total ?? 'unknown'
+  const artistPopularity = artistData?.popularity ?? 'unknown'
+  const spotifyUrl = track.external_urls?.spotify ?? ''
+
+  let featuresBlock = ''
+  if (features) {
+    featuresBlock = `
+Spotify Audio Features:
+  Energy:           ${features.energy?.toFixed(3) ?? 'unknown'} (0=calm, 1=intense)
+  Valence:          ${features.valence?.toFixed(3) ?? 'unknown'} (0=dark/sad, 1=happy/euphoric)
+  Danceability:     ${features.danceability?.toFixed(3) ?? 'unknown'} (0=least, 1=most)
+  Acousticness:     ${features.acousticness?.toFixed(3) ?? 'unknown'} (0=electronic, 1=acoustic)
+  Instrumentalness: ${features.instrumentalness?.toFixed(3) ?? 'unknown'} (>0.5 likely no vocals)
+  Liveness:         ${features.liveness?.toFixed(3) ?? 'unknown'} (>0.8 likely live recording)
+  Speechiness:      ${features.speechiness?.toFixed(3) ?? 'unknown'} (>0.66 likely spoken word)
+  Loudness:         ${features.loudness?.toFixed(2) ?? 'unknown'} dB (integrated loudness)
+  Tempo (Spotify):  ${features.tempo?.toFixed(1) ?? 'unknown'} BPM
+  Key (Spotify):    ${features.key ?? 'unknown'} (0=C, 1=C#, 2=D... 11=B)
+  Mode:             ${features.mode === 1 ? 'Major' : features.mode === 0 ? 'Minor' : 'unknown'}
+  Time Signature:   ${features.time_signature ?? 'unknown'}/4`
+  }
+
+  return `
+--- SPOTIFY DATA (verified against live database) ---
+Track Found: ${track.name} by ${artistName}
+Album: ${albumName} (${albumType}, released ${releaseDate})
+Spotify Popularity Score: ${popularity}/100 (real-time listener demand)
+Spotify URL: ${spotifyUrl}
+
+Artist Profile:
+  Genres: ${genres}
+  Followers: ${typeof artistFollowers === 'number' ? artistFollowers.toLocaleString() : artistFollowers}
+  Artist Popularity: ${artistPopularity}/100
+${featuresBlock}
+---`
+}
+
+// ─── Build enriched audioInfo ──────────────────────────────────────────────────
+function buildEnrichedAudioInfo(baseAudioInfo, spotifyData) {
+  let enriched = baseAudioInfo
+  const spotifyBlock = buildSpotifyEnrichment(spotifyData)
+  if (spotifyBlock) enriched += spotifyBlock
+  return enriched
+}
+
+// ─── Batch prompts ─────────────────────────────────────────────────────────────
 const BATCH_PROMPTS = {
   1: `You are Ducer — a music intelligence engine operating as a hybrid of A&R evaluator, producer consultant, market strategist, and risk assessor.
 
@@ -12,22 +138,23 @@ CORE DOCTRINE:
 - Never hallucinate missing data. If BPM, key, or genre are unknown, say so explicitly and reason from what IS available.
 - Separate file truth from song truth. A low-bitrate upload can still teach arrangement lessons while limiting mastering conclusions.
 - Judge by lane function. A death metal track is not penalized for not behaving like synth-pop. Evaluate whether the song succeeds in its own lane first.
+- If Spotify data is present, use it to ground claims about genre, popularity, and artist positioning. Reference the Spotify popularity score and artist follower count when discussing market standing.
 
 AUDIO DATA:
 {audioInfo}
 
 ARTIST GOAL: {question}
 
-Produce sections 1-4. Every section is mandatory. Use exactly these headers:
+Produce sections 1–4. Every section is mandatory. Use exactly these headers:
 
 ## 1. SONG IDENTITY
-State what this song is based on all available data. Artist, title, format, duration. Note source quality flags (low bitrate, lossy conversion, mono, missing tags). If data is missing, say what is missing and what that limits.
+State what this song is based on all available data. Artist, title, format, duration. If Spotify data is present, reference the release date, album context, and Spotify popularity score. Note source quality flags (low bitrate, lossy conversion, mono, missing tags). If data is missing, say what is missing and what that limits.
 
 ## 2. FILE HEALTH & TECHNICAL SNAPSHOT
-Assess the technical state directly. Cover: format and bitrate quality judgment (release-ready, demo quality, or compromised?), sample rate, channel configuration, duration. Reference the RMS loudness and crest factor from the signal analysis data. Spotify/YouTube normalize to -14 LUFS integrated, Apple Music to -16 LUFS — use this context when assessing loudness. Be direct. If the file has problems, name them.
+Assess the technical state directly. Cover: format and bitrate quality judgment (release-ready, demo quality, or compromised?), sample rate, channel configuration, duration. Reference the RMS loudness and crest factor. If Spotify loudness data is present, compare it to the file's measured loudness. Spotify/YouTube normalize to -14 LUFS integrated, Apple Music to -16 LUFS — use this context when assessing loudness. Be direct. If the file has problems, name them.
 
 ## 3. WHAT THE FILE IS ACTUALLY TELLING US
-Translate technical data into production intelligence. Use the actual signal analysis numbers — RMS, crest factor, frequency band energy percentages, spectral centroid, onset strength — to make specific observations about the mix. What does the frequency balance suggest about the mix approach? Is the low end dominant, scooped, or balanced? What does the crest factor tell you about dynamic range and compression? What would a mastering engineer flag immediately?
+Translate technical data into production intelligence. Use signal analysis numbers — RMS, crest factor, frequency band energy percentages — to make specific observations about the mix. If Spotify audio features are present, cross-reference energy, valence, acousticness, and instrumentalness to validate or challenge what the file data suggests. What does the frequency balance suggest about the mix approach? What would a mastering engineer flag immediately?
 
 ## 4. STRUCTURAL WORKING MAP
 Map the song's architecture based on duration and all available metadata. Estimate section timing with timestamps. Identify: How quickly does the song establish its identity? Where is the first payoff moment? Is the structure front-loaded or patient? Does the song earn its runtime? What structural risks exist? Is this pressure architecture, pop-chorus architecture, or event-based architecture?`,
@@ -40,11 +167,12 @@ CORE DOCTRINE:
 - Differentiate polish from breakthrough identity — a well-made record is not always a memorable one.
 - Hook durability is not just catchiness. Evaluate the mechanism behind each dimension.
 - Use the BPM and key data to inform rhythm and harmony analysis where relevant.
+- If Spotify audio features are present, use danceability and energy to inform hook and production assessments. Use valence to inform emotional register analysis.
 
 AUDIO DATA:
 {audioInfo}
 
-Produce sections 5-8. Use exactly these headers:
+Produce sections 5–8. Use exactly these headers:
 
 ## 5. HOOK DURABILITY
 Evaluate the hook across all five dimensions. For each: give a rating (Low / Medium / Medium-High / High / Very High / Elite) AND explain the specific mechanism that earns that rating.
@@ -53,10 +181,10 @@ Evaluate the hook across all five dimensions. For each: give a rating (Low / Med
 3. Lyrical stickiness — are the words themselves memorable, or does the meaning carry it?
 4. Dynamic lift — does the song physically change in energy at the hook moment?
 5. Crowd participation viability — can a room of people participate without knowing the song?
-Then give an overall hook durability assessment in 2-3 sentences.
+Then give an overall hook durability assessment in 2–3 sentences.
 
 ## 6. PRODUCTION & ARRANGEMENT INTELLIGENCE
-Assess the production with specificity. Use the actual signal data — frequency band percentages, spectral centroid, onset strength — to ground your observations. Cover: instrument layers present or implied, percussion style and role, bass movement and low-end behavior (reference the sub/low-mid band percentages), stereo width, texture density, use of space. Answer: what is the center of gravity in this mix? What would a producer flag immediately?
+Assess the production with specificity. Use the actual signal data — frequency band percentages, spectral centroid, onset strength — to ground your observations. If Spotify features are present, cross-reference acousticness, energy, and instrumentalness. Cover: instrument layers present or implied, percussion style and role, bass movement and low-end behavior, stereo width, texture density, use of space. Answer: what is the center of gravity in this mix? What would a producer flag immediately?
 
 ## 7. LYRICS INTELLIGENCE
 Analyze lyric function directly. Answer all 8 questions:
@@ -76,6 +204,7 @@ Define with precision:
 - Secondary lane (crossover potential or adjacent market)
 - Playlist ecosystem (what playlists is this realistically competing for?)
 - Audience archetype (who is the core listener and what do they need from this song?)
+If Spotify genre data is present, validate or challenge the lane classification against it.
 Also answer: Is this song trying to own a lane or compete in a crowded one? Does the execution match that ambition?`,
 
   3: `You are Ducer — a music intelligence engine. Label strategy memo only. No generic praise. Every claim specific and explained.
@@ -86,23 +215,24 @@ CORE DOCTRINE:
 - Separate artistic strength from commercial scalability — they are not the same thing.
 - Ask: what kind of leverage is this song trying to create? Does the execution support that leverage?
 - Communal ownership is a form of commercial leverage.
+- If Spotify popularity score and artist follower count are present, use them as hard evidence when modeling trajectory. A track with 65+ popularity is already demonstrating pull. A track at 30 or below is in early-discovery territory.
 
 AUDIO DATA:
 {audioInfo}
 
-Produce sections 9-11. Use exactly these headers:
+Produce sections 9–11. Use exactly these headers:
 
 ## 9. MARKET & RELEASE POSITIONING
-Assess: hook accessibility for the target lane, radio viability (be specific about format), playlist compatibility (name the types), sync potential (what use cases — TV drama, ad, trailer, game?), viral potential (what platform and why), cultural/era alignment (is this early, aligned, or late to its trend wave?). Name 2-3 comparable artists whose leverage mechanism is similar. Explain the comparison. Separate artistic strength from commercial scalability.
+Assess: hook accessibility for the target lane, radio viability (be specific about format), playlist compatibility (name the types), sync potential (what use cases — TV drama, ad, trailer, game?), viral potential (what platform and why), cultural/era alignment (is this early, aligned, or late to its trend wave?). If Spotify data is present, reference the popularity score, genre tags, and artist follower count as market evidence. Name 2–3 comparable artists whose leverage mechanism is similar. Explain the comparison. Separate artistic strength from commercial scalability.
 
 ## 10. TRAJECTORY SCENARIOS
-Model three distinct scenarios. For each: scenario name, probability band (e.g. 35-50%), what must happen for it to occur, what could prevent it.
+Model three distinct scenarios. For each: scenario name, probability band (e.g. 35–50%), what must happen for it to occur, what could prevent it.
 
 Scenario A — Organic / fan-driven growth
 Scenario B — Editorial / playlist placement
 Scenario C — Viral breakout or sync placement
 
-End with: What is the audience ceiling? Is this niche-dominant or broad-scale, and what evidence supports that?
+If Spotify popularity data is present, anchor the probability bands to the current score. End with: What is the audience ceiling? Is this niche-dominant or broad-scale, and what evidence supports that?
 
 ## 11. RISK FACTORS
 List specific risks as a direct bulleted list. No softening. Cover: structural risks, hook weakness if present, saturation and genre fatigue, distinguishability ceiling, production risks, market timing risks. Every song has risks. Name them.`,
@@ -114,6 +244,7 @@ CORE DOCTRINE:
 - Scores must reflect honest assessment, not encouragement. A 6 means something. A 9 means something different.
 - The verdict must answer: what kind of leverage is this song trying to create, and does it succeed?
 - The single most important action must be genuinely actionable — not "improve your mix" but specifically what and why.
+- If Spotify data is present, the verdict must acknowledge the current market position as hard evidence, not speculation.
 
 AUDIO DATA:
 {audioInfo}
@@ -129,22 +260,35 @@ Produce section 12. Use exactly this header:
 - Market Positioning: X/10
 - **Overall Ducer Score: X/10**
 
-**Written Verdict:** 4-6 sentences. State where this record stands, what lane it is competing in, what its real ceiling is, whether it has breakthrough identity or polish without inevitability, and what the single most important gap is. Be direct. No softening.
+**Written Verdict:** 4–6 sentences. State where this record stands, what lane it is competing in, what its real ceiling is, whether it has breakthrough identity or polish without inevitability, and what the single most important gap is. Be direct. No softening.
 
 **Ducer Improvement Priority:** One specific, immediately actionable recommendation. Name what to change, why it matters, and what outcome to expect. Something the artist can act on this week.`
 }
 
+// ─── Route handler ─────────────────────────────────────────────────────────────
 export async function POST(request) {
   try {
-    const { audioInfo, question, batch } = await request.json()
+    const body = await request.json()
+    const { audioInfo, question, batch } = body
 
     const promptTemplate = BATCH_PROMPTS[batch]
     if (!promptTemplate) {
       return Response.json({ error: 'Invalid batch' }, { status: 400 })
     }
 
+    // Extract title and artist from audioInfo for Spotify lookup
+    const titleMatch = audioInfo.match(/Title:\s*(.+)/i)
+    const artistMatch = audioInfo.match(/Artist:\s*(.+)/i)
+    const title = titleMatch?.[1]?.trim()
+    const artist = artistMatch?.[1]?.trim()
+
+    // Fetch Spotify data (gracefully degrades if unavailable or track not found)
+    const spotifyData = await getSpotifyData(title, artist)
+
+    const enrichedAudio = buildEnrichedAudioInfo(audioInfo, spotifyData)
+
     const prompt = promptTemplate
-      .replace('{audioInfo}', audioInfo)
+      .replace('{audioInfo}', enrichedAudio)
       .replace('{question}', question || 'Give me a full analysis')
 
     const stream = await client.messages.stream({
@@ -157,7 +301,10 @@ export async function POST(request) {
     const readable = new ReadableStream({
       async start(controller) {
         for await (const chunk of stream) {
-          if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
+          if (
+            chunk.type === 'content_block_delta' &&
+            chunk.delta.type === 'text_delta'
+          ) {
             controller.enqueue(encoder.encode(chunk.delta.text))
           }
         }
