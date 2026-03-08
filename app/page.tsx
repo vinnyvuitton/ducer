@@ -574,10 +574,13 @@ export default function Home() {
       const metadata = await parseBlob(file)
 
       setLoadingStage('Analyzing audio signal...')
-      // Run client-side Web Audio analysis and browser→Render librosa call in parallel
+      // Run Web Audio analysis immediately — fire Render call with short race
       const [audioFeatures, librosaData] = await Promise.all([
         extractAudioFeatures(file),
-        fetchLibrosaData(file),
+        Promise.race([
+          fetchLibrosaData(file),
+          new Promise<string>(resolve => setTimeout(() => resolve(''), 3000))
+        ])
       ])
 
       const audioInfo = `
